@@ -75,13 +75,21 @@ class _RoleHomeState extends State<RoleHome> {
       [Icons.dashboard_outlined,Icons.add_box_outlined,Icons.receipt_long_outlined,Icons.person_outline];
     return Scaffold(appBar:AppBar(title:const Text('FoodieNoms',style:TextStyle(fontWeight:FontWeight.w800,fontSize:21)),actions:[
       const Padding(padding:EdgeInsets.symmetric(vertical:18),child:Text('DEMO',style:TextStyle(fontSize:10,fontWeight:FontWeight.w700,color:forest))),
-      PopupMenuButton<String>(tooltip:'Demo menu',onSelected:(action)async{
-        if(action=='switch')widget.onSwitch();
+      IconButton(tooltip:'Demo menu',icon:const Icon(Icons.more_vert),onPressed:()async{
+        final action=await showModalBottomSheet<String>(context:context,builder:(sheet)=>SafeArea(
+          child:Column(mainAxisSize:MainAxisSize.min,children:[
+            ListTile(leading:const Icon(Icons.switch_account_outlined),title:const Text('Switch experience'),
+              onTap:()=>Navigator.pop(sheet,'switch')),
+            ListTile(leading:const Icon(Icons.restart_alt),title:const Text('Reset demo'),
+              onTap:()=>Navigator.pop(sheet,'reset')),
+          ])));
+        if(!mounted)return;
+        if(action=='switch'){widget.onSwitch();return;}
         if(action=='reset'&&await confirm(context,'Reset all demo listings, reservations and profile changes?')){
+          if(!mounted)return;
           widget.store.reset();widget.onSwitch();
         }
-      },itemBuilder:(_)=>[const PopupMenuItem(value:'switch',child:Text('Switch experience')),
-        const PopupMenuItem(value:'reset',child:Text('Reset demo'))]),
+      }),
     ]),body:SafeArea(child:AnimatedBuilder(animation:widget.store,builder:(c,_)=>
       admin?AdminScreen(store:widget.store):student?
         switch(index){0=>DiscoverScreen(store:widget.store),1=>NearbyScreen(store:widget.store),
