@@ -1,66 +1,66 @@
-# FoodieNoms — client demo
+# FoodieNoms — screenshot-based HTML demo
 
-A responsive, interactive sample application based on the supplied FoodieNoms screenshots. Student and Vendor layouts adapt to mobile; Admin includes a desktop sidebar. Built with plain JavaScript and CSS, without dependency installation.
+The website has been rebuilt in **plain HTML, CSS and JavaScript** around the screenshots supplied in chat. Desktop browsing preserves the narrow Student/Vendor app proportions rather than turning the design into a wide marketing website. Admin uses the supplied desktop sidebar layout.
 
-## Run
+## Easiest presentation: no installation
 
-Requires Node.js 20 or newer.
+1. Download the latest repository ZIP from GitHub (**Code → Download ZIP**).
+2. **Extract All** into a new folder so you do not open the old version.
+3. Right-click **`FoodieNoms-demo.html` → Open with → Google Chrome or Microsoft Edge**.
+
+This is a self-contained presentation file: CSS, scripts, photos, logo recreation and icons are embedded. No Node.js, Flutter, internet connection or VS Code extension is needed to run it in a normal browser. It is intended for an external browser, not VS Code's restricted `file:///` preview. If your PC/browser policy blocks local HTML, use Live Server below.
+
+## Edit in VS Code
+
+- Open the extracted root folder containing `index.html`.
+- Edit `index.html`, `src/style.css`, `src/app.js` and `src/store.js`.
+- Open `index.html` in your external browser, or install **Live Server by Ritwick Dey** and right-click it → **Open with Live Server**.
+- VS Code may require you to trust this project folder to enable extensions.
+
+`FoodieNoms-demo.html` is a generated presentation copy. Changes to the source do not update it until you rebuild it.
+
+## Screens and demonstration journey
+
+Start at **Choose your experience**. Student/Vendor open the welcome screen; select **I already have an account** to reach login. The login screen includes **Student demo**, **Vendor demo** and **Admin demo** shortcuts, so no real credentials are needed.
+
+1. Open **Admin demo → Vendors** and approve **Subang Cafe**.
+2. Use the **Switch experience** control above the frame. Open Vendor → Login → **Vendor demo**.
+3. Select **Add Surplus Food** and publish a listing. New Subang Cafe listings require approval; Sample Bakery is already approved.
+4. Switch to Student → Login → **Student demo**. Browse the compact deal list, search, or select **View all** for category/price/pickup filters.
+5. Open a deal → **Reserve for Pickup** → **Continue to Checkout** → **Reserve — Pay at Pickup**. Note the six-digit code.
+6. Switch to Vendor → **Orders**, enter the code and select **Mark Collected**.
+7. Review the updated Student reservation or Admin oversight. Use **Reset demo** above the frame before the next presentation.
+
+Student Profile and Vendor Dashboard link to their feature directories: favourites, cart, pickup pass, reviews, settings, help, business profile, pickup verification, notifications and insights. Admin's overview links to support, role, service-area and audit screens. Registration, password reset and location screens are front-end simulations. Review submission requires a collected sample reservation. Support requests are recorded locally; nothing is sent.
+
+## Design fidelity and assets
+
+The original wide-layout redesign has been replaced. The frames, section order, compact cards, colours, button treatment, navigation and visible copy follow the supplied screenshots.
+
+**An exact pixel/asset match is not claimed.** The original logo and photography were not supplied as individual files. The current logo, food photos, avatar and illustrated map are generated recreations; see [asset provenance](src/assets/README.md). Original PNG/JPG/SVG exports are needed to replace these with the exact Figma assets. Reference boards also depict different sample states; live demo stock and order states can differ after interactions.
+
+## Optional Node.js tools
+
+Only developers rebuilding the self-contained presentation or running tests need Node.js 20+:
 
 ```sh
-cd FoodieNoms
 npm start
-```
-
-Open `http://localhost:3000` in Chrome or Edge on your PC. Set `PORT` to use another port.
-
-**VS Code:** Open the repository root folder containing `package.json` (not `mobile/`). After installing Node.js, restart VS Code. You can run the commands above in **Terminal → New Terminal**, or select **FoodieNoms: open website demo** in **Run and Debug** and press **F5** if Chrome is installed. If a server is already running on port 3000, open it in your browser directly.
-
-For a presentation, use the same browser throughout so Student, Vendor and Admin share the demo data. Use the browser's device toolbar to show the mobile layout.
-
-## Static website build
-
-```sh
+npm test
+npm run check
 npm run build
 ```
 
-This produces `dist/`, containing only the website files. It can be served by a static hosting provider and will also work under a path such as `/FoodieNoms/`. Open it through an HTTP server, not by double-clicking the HTML file.
+On Windows PowerShell, use `npm.cmd` instead of `npm` if `npm.ps1` is blocked. The server opens on port 3000. The build regenerates `FoodieNoms-demo.html` and `dist/`. Dependencies do not need installing.
 
-## Existing Flutter application
+## Demo limits and future app packaging
 
-The separate **Flutter/Dart Android app** remains in [mobile/](mobile/). See [its setup and APK instructions](mobile/README.md). This website is the quickest first-presentation route; the Flutter source is retained for mobile development.
+All roles share local sample data in the same browser. Data is not shared across PCs/devices; storage availability for local files depends on the browser. Reset clears it. Roles are not authentication or authorization. Prices, impact totals, notification content and maps are illustrative. No real payment, GPS, email, camera QR scanning, backend or production account is connected. Do not enter private information.
 
-```sh
-npm test
-npm run check
-```
+The static `dist/` website can later be packaged with Capacitor for Android and iOS; that conversion is not part of this revision. A separate existing [Flutter/Dart Android version](mobile/README.md) remains in `mobile/` and has not been changed to match this HTML revision.
 
-## Suggested client presentation
+## Validation
 
-1. Select **Administrator**, open **Vendors**, and approve **Subang Cafe**.
-2. **Switch role** → **Vendor** → **Add Surplus Food**, and publish a deal.
-3. **Switch role** → **Student**, browse/search/filter deals and open the new listing.
-4. Reserve a portion, confirm pay-at-pickup and note the six-digit pickup code.
-5. **Switch role** → **Vendor** → **Reservations**, enter that code and confirm collection.
-6. View the updated reservation in Student and Admin. Reports and Activity Log reflect the changes.
-7. Use **Reset demo** before the next presentation.
-
-Additional interactions include favourites, cancellation with stock restoration, listing edits/moderation, profile editing and an illustrative nearby map.
-
-## Demo boundaries
-
-- All roles share sample data stored in this browser's localStorage. Different browsers/devices do not share data. Reset clears the sample state.
-- Role selection is demonstration navigation, not authentication or authorization. Do not use real personal information or deploy this as a production service.
-- No backend, Supabase, live GPS/map tiles, payment processing, camera/QR scanner, email, or push notifications are connected. Pickup uses a sample numeric code, not a QR image.
-- Food artwork uses emoji; the original logo and food photography were not supplied as standalone assets. Fonts use Google Fonts when available, with system fallbacks.
-- This is a browser application, not a Flutter/Android package. The supplied PDF describes a future production architecture; its full feature list is outside this first-demo scope.
-- Browser persistence is convenient for presentation only. Stock and pickup checks are local demo logic, not production concurrency or security guarantees.
-
-## Files
-
-- `src/app.js`: screens, navigation, events and demo persistence
-- `src/store.js`: sample data and reservation transitions
-- `src/style.css`: theme and responsive layouts
-- `server.js`: small development HTTP server
-- `scripts/build.js`: creates the static `dist/` website
-- `.vscode/`: optional F5 launch configuration
-- `tests/store.test.js`: reservation, stock and collection tests
+- Four reservation/stock/collection unit tests.
+- Browser-tested Admin approval → Vendor publication → Student search/reservation → code-verified pickup, persistence, module navigation and 320/390px layouts.
+- The self-contained HTML was loaded over HTTP and its reservation flow verified after disabling networking, with no additional HTTP asset requests.
+- Direct `file:///` navigation in the managed cloud browser is blocked by its administrator policy, so a Windows double-click launch has not been directly verified here. No ES modules or fetch calls are required by the presentation file.
