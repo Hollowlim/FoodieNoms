@@ -1,15 +1,3 @@
-# FoodieNoms
-
-## Flutter Android application
-
-The mobile app requested for the client demo is in **[mobile/](mobile/)**. It uses **Flutter and Dart** and runs as an Android application, without embedding a website. See **[mobile setup and APK instructions](mobile/README.md)**.
-
-To download an Android APK after a successful build, open **[Actions → Build Android demo APK](https://github.com/Hollowlim/FoodieNoms/actions/workflows/android-demo.yml)** and download the **FoodieNoms-Android-APK** artifact.
-
-The earlier browser prototype remains below as a separate reference.
-
----
-
 # FoodieNoms — client demo
 
 A responsive, interactive sample application based on the supplied FoodieNoms screenshots. Student and Vendor layouts adapt to mobile; Admin includes a desktop sidebar. Built with plain JavaScript and CSS, without dependency installation.
@@ -19,11 +7,27 @@ A responsive, interactive sample application based on the supplied FoodieNoms sc
 Requires Node.js 20 or newer.
 
 ```sh
-cd /workspace/FoodieNoms
+cd FoodieNoms
 npm start
 ```
 
-Open the server on port 3000 in your local development browser. Set `PORT` to use another port.
+Open `http://localhost:3000` in Chrome or Edge on your PC. Set `PORT` to use another port.
+
+**VS Code:** Open the repository root folder containing `package.json` (not `mobile/`). After installing Node.js, restart VS Code. You can run the commands above in **Terminal → New Terminal**, or select **FoodieNoms: open website demo** in **Run and Debug** and press **F5** if Chrome is installed. If a server is already running on port 3000, open it in your browser directly.
+
+For a presentation, use the same browser throughout so Student, Vendor and Admin share the demo data. Use the browser's device toolbar to show the mobile layout.
+
+## Static website build
+
+```sh
+npm run build
+```
+
+This produces `dist/`, containing only the website files. It can be served by a static hosting provider and will also work under a path such as `/FoodieNoms/`. Open it through an HTTP server, not by double-clicking the HTML file.
+
+## Existing Flutter application
+
+The separate **Flutter/Dart Android app** remains in [mobile/](mobile/). See [its setup and APK instructions](mobile/README.md). This website is the quickest first-presentation route; the Flutter source is retained for mobile development.
 
 ```sh
 npm test
@@ -57,4 +61,6 @@ Additional interactions include favourites, cancellation with stock restoration,
 - `src/store.js`: sample data and reservation transitions
 - `src/style.css`: theme and responsive layouts
 - `server.js`: small development HTTP server
+- `scripts/build.js`: creates the static `dist/` website
+- `.vscode/`: optional F5 launch configuration
 - `tests/store.test.js`: reservation, stock and collection tests
