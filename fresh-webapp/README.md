@@ -33,7 +33,9 @@ Alternatively, in Chrome or Edge press **F12**, then **Ctrl + Shift + M** to tog
 - **Vendor:** use the seeded Subang Cafe business, create/edit surplus listings after approval, and confirm collection.
 - **Admin:** approve vendors and manage the sample platform.
 
-Demo admin login:
+Admin is separate from the Student/Vendor welcome screen. Append **`?admin=1`** to the app address, for example `http://127.0.0.1:5500/index.html?admin=1`. This is a frontend login for presentation, not secure server authentication.
+
+Admin login:
 
 ```text
 Username: admin123

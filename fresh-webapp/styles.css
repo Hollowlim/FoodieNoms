@@ -245,3 +245,104 @@ dialog p { font-size:14px; color:var(--muted); }
 @media(prefers-reduced-motion:reduce) { * { transition:none!important; scroll-behavior:auto!important; } }
 .pickup-code { font-size:clamp(20px,5vw,32px); letter-spacing:2px; overflow-wrap:anywhere; }
 @media(min-width:700px) { .side-nav { min-height:0; overflow-y:auto; } }
+
+/* Refined visual system: local fonts and assets, no external dependencies. */
+:root {
+  --cream:#f8f7f2; --green:#19543f; --forest:#123e30; --teal:#217052;
+  --mint:#e6eddf; --light-mint:#edf3eb; --ink:#20382e; --muted:#738177;
+  --line:#e2e7df; --radius:20px;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+}
+body { line-height:1.45; }
+h1 { font-weight:750; letter-spacing:-1px; }
+h2 { letter-spacing:-.4px; }
+.button { border-radius:14px; min-height:50px; transition:background .18s,box-shadow .18s; }
+.primary { background:linear-gradient(135deg,#225f47,#154632); box-shadow:0 5px 14px #163f3015; }
+input,textarea,select { border-radius:13px; min-height:53px; box-shadow:0 2px 6px #20382e03; }
+.field>span { font-size:12px; color:#4f6356; }
+.entry-page { align-items:flex-start; padding: max(32px,env(safe-area-inset-top)) 24px max(28px,env(safe-area-inset-bottom)); background:radial-gradient(ellipse at 90% 0%,#e4ebde 0%,transparent 48%),var(--cream); }
+.entry-card { max-width:430px; }
+.entry-logo { width:94px; height:94px; border-radius:24px; margin:0 0 15px; box-shadow:0 8px 25px #21412c08; }
+.entry-card>h1 { font-size:25px; text-align:left; letter-spacing:-.8px; }
+.entry-tagline { text-align:left; margin:5px 0 35px; font-size:13px; }
+.eyebrow { color:var(--green); letter-spacing:1.6px; font-size:9px; font-weight:750; margin-bottom:12px; }
+.entry-card>h2 { font-size:38px; line-height:1.12; letter-spacing:-1.8px; margin-bottom:16px; font-weight:750; }
+.entry-description { color:var(--muted); max-width:300px; font-size:14px; margin-bottom:28px; }
+.experience-list { gap:12px; }
+.experience-card { min-height:94px; padding:20px; border-radius:20px; box-shadow:0 5px 20px #213e2b05; }
+.experience-card:first-child { background:var(--forest); color:#fff; border-color:var(--forest); }
+.experience-card:first-child small { color:#cbdacc; }
+.experience-card:first-child .icon { filter:invert(1); opacity:.8; }
+.experience-card strong { font-size:18px; letter-spacing:-.3px; }
+.experience-card .icon { background:#e5ecdf; padding:8px; width:32px; height:32px; border-radius:50%; opacity:1; }
+.experience-card:first-child .icon { background:transparent; }
+.entry-location { margin-top:30px; font-size:11px; }
+.legal { font-size:10px; margin-top:5px; }
+.auth-page { background:var(--cream); }
+.auth-card { max-width:440px; }
+.auth-top { margin-bottom:24px; min-height:44px; }
+.auth-top>strong { font-size:21px; letter-spacing:-.7px; }
+.auth-art { background:linear-gradient(115deg,#173f2ff0,#173f2f35),url('./assets/food-sheet.png') 0 0/200% auto; border-radius:22px; padding:23px; min-height:145px; color:white; margin-bottom:28px; }
+.auth-art>span { font-size:8px; letter-spacing:1.7px; color:#e0ead8; font-weight:700; }
+.auth-art>strong { display:block; margin-top:12px; font-size:25px; letter-spacing:-.8px; line-height:1.15; }
+.auth-card .page-heading { margin-bottom:25px; }
+.auth-card h1 { font-size:29px; }
+.auth-card .page-heading>p { margin-top:7px; }
+.auth-card .form-stack { gap:18px; }
+.auth-link { margin-top:18px; }
+.app-header { min-height:70px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+.brand { font-size:21px; letter-spacing:-.8px; }
+.role-chip { letter-spacing:1px; padding:7px 11px; }
+.profile-button { width:40px; height:40px; }
+.app-content { padding-top:28px; }
+.discover-content { padding-top:0; }
+.discovery-banner { padding-top:18px; background:linear-gradient(135deg,#123e30,#235f47); }
+.discovery-banner h1 { font-size:31px; letter-spacing:-1.1px; max-width:285px; }
+.discovery-banner>p { color:#c7d8ca; }
+.location-chip { border-radius:11px; background:#ffffff12; border:1px solid #ffffff13; }
+.search-box>input { border:0; box-shadow:0 8px 24px #173f3015; border-radius:15px; height:54px; }
+.rescue-ribbon { background:transparent; border-bottom:1px solid var(--line); padding:9px 0 16px; border-radius:0; letter-spacing:.8px; }
+.category { min-height:42px; padding:10px 17px; font-size:12px; }
+.category.active { color:white; background:var(--forest); border-color:var(--forest); }
+.food-grid { gap:20px; }
+.food-card { border-radius:22px; border:1px solid #e8ece3; box-shadow:0 6px 24px #183f3007; }
+.food-card .card-open { display:block; padding:0; }
+.food-card .food-photo { width:100%; height:180px; border-radius:0; }
+.card-copy { padding:18px; gap:8px; }
+.card-copy>strong { font-size:18px; letter-spacing:-.5px; }
+.card-copy>small:first-child { text-transform:uppercase; letter-spacing:1px; font-size:9px; }
+.card-copy>small { font-size:11px; }
+.card-price { font-size:21px; }
+.save-button { top:12px; right:12px; width:38px; height:38px; box-shadow:0 3px 12px #00000012; }
+.save-button .icon { width:19px; height:19px; }
+.bottom-nav { border-top-color:#edf0e8; padding-top:7px; }
+.nav-item { border-radius:15px; }
+.panel,.metric,.info-panel,.impact-card,.vendor-status,.pickup-pass { border-radius:20px; }
+.panel,.metric { box-shadow:0 4px 20px #183f3004; }
+.metric strong { letter-spacing:-1px; }
+.detail-photo { border-radius:22px; height:250px; }
+.page-heading { margin-bottom:27px; }
+@media(min-width:700px) {
+  .entry-page { padding-top:65px; padding-bottom:55px; }
+  .entry-card { background:#ffffff80; border:1px solid #fff; padding:36px; border-radius:30px; max-width:500px; box-shadow:0 20px 80px #183f3008; }
+  .entry-card>h2 { font-size:44px; }
+  .auth-page { padding-top:36px; }
+  .auth-card { max-width:480px; background:#ffffff90; border:1px solid #fff; padding:28px; border-radius:28px; }
+  .app-shell { grid-template-rows:80px minmax(0,1fr); }
+  .side-nav { background:#edf0e7; }
+  .discovery-banner h1 { max-width:none; font-size:36px; }
+  .food-card .food-photo { height:175px; }
+  .detail-photo { height:320px; }
+}
+@media(max-width:374px) {
+  .entry-page { padding:22px 20px; }
+  .entry-logo { width:76px; height:76px; }
+  .entry-tagline { margin-bottom:24px; }
+  .entry-card>h2 { font-size:33px; }
+  .entry-description { margin-bottom:20px; }
+  .experience-card { min-height:86px; padding:17px; }
+  .auth-art { min-height:115px; padding:18px; margin-bottom:22px; }
+  .auth-art>strong { font-size:22px; }
+  .auth-top { margin-bottom:18px; }
+  .food-card .food-photo { height:155px; }
+}

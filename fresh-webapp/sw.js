@@ -1,5 +1,5 @@
 /* Bump VERSION when publishing changed app files. Do not activate over an open demo. */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SCOPE_URL = new URL(self.registration.scope);
 const CACHE_PREFIX = `foodienoms-fresh-${encodeURIComponent(SCOPE_URL.pathname)}-`;
 const CACHE_NAME = `${CACHE_PREFIX}${VERSION}`;

@@ -23,3 +23,8 @@ These are Chromium viewport checks, not Safari, Xcode, an iOS simulator or physi
 - `iphone-home.png`: 393×852 Student home.
 - `ipad-home.png`: 820×1180 Student home.
 - `device-preview.png`: 1400×1100 desktop showing a phone frame and working controls.
+
+
+## Premium presentation refresh
+
+Verified at 320×667, 393×852, 820×1180 and 1180×820 in Chromium: only Student/Vendor on welcome, login header within first 100 CSS pixels, no document horizontal overflow, reservation through pickup pass, no visible demo labels. Separate `index.html?admin=1` rejects an incorrect password and accepts the configured credentials. No browser JavaScript errors. Existing 20 data tests, syntax checks and static build passed. Real iOS Safari validation remains outstanding.
