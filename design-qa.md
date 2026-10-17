@@ -42,3 +42,7 @@ Direct `file:///` navigation was blocked by the managed cloud browser's administ
 ## Remaining requirement
 
 Supply the original Figma logo/photo/avatar/map exports and preferably full-resolution individual screen PNGs. Replace generated assets, capture matching states at the original viewport, and perform the combined source/implementation comparison before calling the design an exact match. No claim of exact fidelity or completed website-to-native conversion is made in this revision.
+
+## Requested login and toolbar revision
+
+The outer screen label / Switch experience / Reset demo toolbar was removed from every screen. Admin login uses the requested public demo credentials, with an inline error for a mismatch and an in-portal logout action. Demo role shortcuts were removed. Signup now explicitly offers Student and Vendor and cannot choose Admin. Browser checks passed on source and standalone HTML, including logout/re-login and reservation. These changes do not resolve the original-asset blockers above.
