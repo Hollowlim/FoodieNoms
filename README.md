@@ -18,7 +18,7 @@ If you download the whole repository instead, the root `index.html` and `preview
 
 Student signup/discovery/search/favourites, reservations and pickup pass; Vendor approval, listings and collection; Admin overview, vendors, moderation, reservations and reports.
 
-**Admin demo login:** `admin123` / `admin@123`. Student and Vendor signups create local sample profiles. Authentication, payments and maps are demonstrations; data is not shared across devices.
+**Admin:** choose **Already have an account? Log in** on the welcome screen, then enter `admin123` / `admin@123`. Student and Vendor signups create local sample profiles. Authentication, payments and maps are demonstrations; data is not shared across devices.
 
 See **[the full setup and iPhone installation guide](fresh-webapp/README.md)** for same-Wi-Fi testing and HTTPS Add to Home Screen. This delivers a web app, not an App Store/TestFlight native application. Browser device frames are layout previews, not iOS simulators.
 

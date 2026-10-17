@@ -3,9 +3,17 @@
 
   const STORAGE_KEY = 'foodienoms.fresh.v1';
 
+  function initialAccountRoles() {
+    return [
+      { email: 'student@example.com', role: 'student' },
+      { email: 'vendor@example.com', role: 'vendor' }
+    ];
+  }
+
   function initialState() {
     return {
       version: 1,
+      accountRoles: initialAccountRoles(),
       profile: { id: 'student-001', name: 'Aina Rahman', email: 'aina@student.example' },
       students: [
         { id: 'student-001', name: 'Aina Rahman', email: 'aina@student.example', status: 'active' },
@@ -41,6 +49,24 @@
 
   function isText(value) {
     return typeof value === 'string' && value.trim().length > 0;
+  }
+
+  function isEmail(value) {
+    return typeof value === 'string' && value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+  }
+
+  // Role hints support local presentation routing; they do not store credentials.
+  function normalizeAccountRoles(saved) {
+    const roles = initialAccountRoles();
+    if (!Array.isArray(saved)) return roles;
+    saved.forEach(function (account) {
+      if (!account || !isEmail(account.email) || !['student', 'vendor'].includes(account.role)) return;
+      const email = account.email.trim().toLowerCase();
+      const previous = roles.find(function (item) { return item.email === email; });
+      if (previous) previous.role = account.role;
+      else roles.push({ email: email, role: account.role });
+    });
+    return roles;
   }
 
   function validSavedState(saved) {
@@ -79,6 +105,8 @@
         // Private browsing, unavailable storage, and damaged data must not stop the demo.
       }
     }
+    // Older saved presentations have no role hints. Preserve their other data.
+    state.accountRoles = normalizeAccountRoles(state.accountRoles);
 
     function persist() {
       if (!persistence) return;
@@ -235,9 +263,27 @@
       return index === -1;
     }
 
+    function resolveRole(email) {
+      if (!isEmail(email)) return null;
+      const normalized = email.trim().toLowerCase();
+      const account = state.accountRoles.find(function (item) { return item.email === normalized; });
+      return account ? account.role : null;
+    }
+
+    function rememberRole(email, role) {
+      if (!isEmail(email)) throw new Error('Enter a valid email address.');
+      if (!['student', 'vendor'].includes(role)) throw new Error('Choose a Student or Vendor account role.');
+      const normalized = email.trim().toLowerCase();
+      const account = state.accountRoles.find(function (item) { return item.email === normalized; });
+      if (account) account.role = role;
+      else state.accountRoles.push({ email: normalized, role: role });
+      persist();
+      return role;
+    }
+
     function saveProfile(name, email) {
       if (!isText(name) || name.trim().length > 100) throw new Error('Enter your name using 1–100 characters.');
-      if (typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) throw new Error('Enter a valid email address.');
+      if (!isEmail(email)) throw new Error('Enter a valid email address.');
       state.profile.name = name.trim();
       state.profile.email = email.trim();
       const student = state.students.find(function (item) { return item.id === state.profile.id; });
@@ -263,6 +309,8 @@
       cancelOrder: cancelOrder,
       collectOrder: collectOrder,
       toggleFavourite: toggleFavourite,
+      resolveRole: resolveRole,
+      rememberRole: rememberRole,
       saveProfile: saveProfile,
       reset: reset
     };

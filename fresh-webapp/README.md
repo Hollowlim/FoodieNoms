@@ -33,7 +33,9 @@ Alternatively, in Chrome or Edge press **F12**, then **Ctrl + Shift + M** to tog
 - **Vendor:** use the seeded Subang Cafe business, create/edit surplus listings after approval, and confirm collection.
 - **Admin:** approve vendors and manage the sample platform.
 
-Admin is separate from the Student/Vendor welcome screen. Append **`?admin=1`** to the app address, for example `http://127.0.0.1:5500/index.html?admin=1`. This is a frontend login for presentation, not secure server authentication.
+On the welcome screen, choose **Already have an account? Log in**. The shared **Email or username** login opens the matching Student, Vendor or Admin portal. No special admin URL is needed; the older `?admin=1` link still opens the same login form. This is a frontend login for presentation, not secure server authentication.
+
+Use `student@example.com` or `vendor@example.com` with any password of at least six characters for the corresponding sample portal. After signup, the email and Student/Vendor role are remembered in this browser; passwords are not saved or checked for those local accounts. An unrecognised email follows the Student/Vendor welcome choice, or defaults to Student through the common login.
 
 Admin login:
 

@@ -346,3 +346,7 @@ input,textarea,select { border-radius:13px; min-height:53px; box-shadow:0 2px 6p
   .auth-top { margin-bottom:18px; }
   .food-card .food-photo { height:155px; }
 }
+
+.welcome-login { margin-top:16px; color:var(--muted); font-size:12px; }
+.welcome-login .text { font-size:13px; padding-inline:4px; }
+.welcome-login + .entry-location { margin-top:16px; }

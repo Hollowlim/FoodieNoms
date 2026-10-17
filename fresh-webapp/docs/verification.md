@@ -28,3 +28,8 @@ These are Chromium viewport checks, not Safari, Xcode, an iOS simulator or physi
 ## Premium presentation refresh
 
 Verified at 320×667, 393×852, 820×1180 and 1180×820 in Chromium: only Student/Vendor on welcome, login header within first 100 CSS pixels, no document horizontal overflow, reservation through pickup pass, no visible demo labels. Separate `index.html?admin=1` rejects an incorrect password and accepts the configured credentials. No browser JavaScript errors. Existing 20 data tests, syntax checks and static build passed. Real iOS Safari validation remains outstanding.
+
+
+## Shared login
+
+Welcome retains only Student/Vendor choices and adds a common Log in link. Chromium verified wrong admin password rejection, correct admin routing, seeded Student/Vendor routing, Vendor signup and case-insensitive email routing after reload, invalid username rejection, two signup roles, legacy admin URL compatibility, and no JavaScript errors. Data tests verify role persistence without passwords and migration of older saved reservations.

@@ -9,7 +9,7 @@
   let category = 'All';
   let searchText = '';
   let priceLimit = 3000;
-  let pickedRole = 'student';
+  let pickedRole = null;
   let noticeTimer;
   const $ = selector => document.querySelector(selector);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -44,12 +44,11 @@
   function intro() {
     return `<div class="entry-page"><main class="entry-card"><img class="entry-logo" src="./assets/logo.png" alt="FoodieNoms food rescue logo"><h1>FoodieNoms</h1><p class="entry-tagline">Eat good. Save more.</p><p class="eyebrow">GOOD FOOD. A BETTER TOMORROW.</p><h2>A little rescue.<br>A lot to love.</h2><p class="entry-description">Fresh finds from your neighbourhood, at a price that feels good.</p><div class="experience-list">${[
       ['student','Student','Discover good food for less'],['vendor','Vendor','Turn surplus into something good']
-    ].map(([id,title,text]) => `<button type="button" class="experience-card" data-action="choose" data-role="${id}"><span><strong>${title}</strong><small>${text}</small></span>${icon('chevron-right')}</button>`).join('')}</div><p class="entry-location">Made for Subang Jaya</p><p class="legal">Good food deserves a second chance.</p></main></div>`;
+    ].map(([id,title,text]) => `<button type="button" class="experience-card" data-action="choose" data-role="${id}"><span><strong>${title}</strong><small>${text}</small></span>${icon('chevron-right')}</button>`).join('')}</div><p class="auth-link welcome-login">Already have an account? ${action('Log in','shared-login','text')}</p><p class="entry-location">Made for Subang Jaya</p><p class="legal">Good food deserves a second chance.</p></main></div>`;
   }
   function auth(signup=false) {
-    const admin = pickedRole === 'admin' && !signup;
     const selectedRole = pickedRole === 'vendor' ? 'vendor' : 'student';
-    return `<div class="entry-page auth-page"><main class="auth-card"><div class="auth-top"><strong>FoodieNoms</strong>${action('‹ Back','back','text')}</div><div class="auth-art" aria-hidden="true"><span>FRESH FINDS. LESS WASTE.</span><strong>Good food,<br>great possibilities.</strong></div>${pageTitle(signup ? 'Create your account' : admin ? 'Admin login' : 'Welcome back', signup ? 'Join our Subang Jaya food rescue community.' : admin ? 'Sign in to the administrator portal.' : 'Good food is waiting for you.')}<form data-form="${signup?'signup':'login'}" class="form-stack">${signup ? field('Full name','name','text','','required maxlength="60" autocomplete="name" placeholder="Your full name"') : ''}${field(admin?'Username':'Email address',admin?'username':'email',admin?'text':'email','','required autocomplete="username" placeholder="'+(admin?'Admin username':'you@example.com')+'"')}${field('Password','password','password','','required minlength="6" autocomplete="'+(signup?'new-password':'current-password')+'" placeholder="Enter your password"')}${signup?`<fieldset class="role-options"><legend>Sign up as</legend>${['student','vendor'].map(r=>`<label><input type="radio" name="role" value="${r}" ${r===selectedRole?'checked':''}><span>Sign up as ${r==='student'?'Student':'Vendor'}</span></label>`).join('')}</fieldset>`:''}<p class="form-error" role="alert" aria-live="polite"></p><button class="button primary" type="submit">${signup?'Create Account':'Log In'}</button></form>${admin?'':`<p class="auth-link">${signup?'Already have an account?':'New to FoodieNoms?'} ${action(signup?'Log in':'Sign up',signup?'login':'signup','text')}</p>`}</main></div>`;
+    return `<div class="entry-page auth-page"><main class="auth-card"><div class="auth-top"><strong>FoodieNoms</strong>${action('‹ Back','back','text')}</div><div class="auth-art" aria-hidden="true"><span>FRESH FINDS. LESS WASTE.</span><strong>Good food,<br>great possibilities.</strong></div>${pageTitle(signup ? 'Create your account' : 'Welcome back', signup ? 'Join our Subang Jaya food rescue community.' : 'Good food is waiting for you.')}<form data-form="${signup?'signup':'login'}" class="form-stack">${signup ? field('Full name','name','text','','required maxlength="60" autocomplete="name" placeholder="Your full name"') : ''}${signup ? field('Email address','email','email','','required autocomplete="email" placeholder="you@example.com"') : field('Email or username','identifier','text','','required maxlength="254" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Email or username"')}${field('Password','password','password','','required minlength="6" autocomplete="'+(signup?'new-password':'current-password')+'" placeholder="Enter your password"')}${signup?`<fieldset class="role-options"><legend>Sign up as</legend>${['student','vendor'].map(r=>`<label><input type="radio" name="role" value="${r}" ${r===selectedRole?'checked':''}><span>Sign up as ${r==='student'?'Student':'Vendor'}</span></label>`).join('')}</fieldset>`:''}<p class="form-error" role="alert" aria-live="polite"></p><button class="button primary" type="submit">${signup?'Create Account':'Log In'}</button></form>${`<p class="auth-link">${signup?'Already have an account?':'New to FoodieNoms?'} ${action(signup?'Log in':'Sign up',signup?'login':'signup','text')}</p>`}</main></div>`;
   }
   const studentNav = [['discover','home','Home'],['nearby','map','Nearby'],['orders','receipt','Orders'],['profile','user','Profile']];
   const vendorNav = [['vendor','home','Dashboard'],['vendor-listings','receipt','Listings'],['vendor-orders','receipt','Orders'],['profile','user','Profile']];
@@ -142,8 +141,9 @@
       else if (name==='back') goBack();
       else if (name==='home') { backStack=[]; navigate(home(),null,true); }
       else if (name==='logout') logout();
+      else if (name==='shared-login') { pickedRole=null; navigate('login'); }
       else if (name==='login') navigate('login');
-      else if (name==='signup') { if(pickedRole==='admin') pickedRole='student'; navigate('signup'); }
+      else if (name==='signup') navigate('signup');
       else if (name==='nav') { backStack=[]; navigate(button.dataset.route,null,true); }
       else if (name==='detail') navigate('detail',id);
       else if (name==='checkout') navigate('checkout',id);
@@ -181,11 +181,15 @@
     if(errorElement) errorElement.textContent='';
     try {
       if(form.dataset.form==='login') {
-        if(pickedRole==='admin') {
-          if(String(values.get('username')).trim()!=='admin123'||values.get('password')!=='admin@123') throw Error('Incorrect admin username or password.');
+        const identifier=String(values.get('identifier')||'').trim();
+        if(identifier.toLowerCase()==='admin123') {
+          if(identifier!=='admin123'||values.get('password')!=='admin@123') throw Error('Incorrect username or password.');
           login('admin');
         } else {
-          login(pickedRole==='vendor'?'vendor':'student');
+          if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) throw Error('Enter a valid email address or username.');
+          const role=store.resolveRole(identifier) || pickedRole || 'student';
+          store.rememberRole(identifier,role);
+          login(role);
           notify('Welcome back. Your next great find is waiting.');
         }
       }
@@ -193,6 +197,7 @@
         const role=values.get('role');
         if(!['student','vendor'].includes(role)) throw Error('Choose Student or Vendor.');
         store.saveProfile(String(values.get('name')),String(values.get('email')));
+        store.rememberRole(String(values.get('email')),role);
         login(role);
         notify('Your profile is ready. Welcome to FoodieNoms.');
       }
@@ -227,7 +232,7 @@
     navigator.serviceWorker.register('./sw.js').catch(() => { /* Online demo remains usable when installation is unavailable. */ });
   }
   if (new URLSearchParams(location.search).get('admin') === '1') {
-    pickedRole = 'admin'; route = {name:'login',data:null};
+    pickedRole = null; route = {name:'login',data:null};
   }
   render();
 })();

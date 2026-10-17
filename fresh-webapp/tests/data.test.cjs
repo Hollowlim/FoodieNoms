@@ -213,3 +213,82 @@ test('reset restores the original data and persists the reset', () => {
   assert.equal(data.state.favourites.length, 0);
   assert.equal(api.createStore(storage).state.orders.length, 0);
 });
+
+test('shared login resolves sample accounts without exposing an administrator role', () => {
+  const data = store();
+  assert.equal(data.resolveRole(' Student@Example.COM '), 'student');
+  assert.equal(data.resolveRole(' VENDOR@example.com '), 'vendor');
+  assert.equal(data.resolveRole('someone@example.com'), null);
+  assert.equal(data.resolveRole('admin123'), null);
+  assert.equal(data.resolveRole(null), null);
+});
+
+test('remembered account roles persist across reloads without storing credentials', () => {
+  const storage = memoryStorage();
+  const first = api.createStore(storage);
+  assert.equal(first.rememberRole('  Neighbour@Example.com  ', 'vendor'), 'vendor');
+  const second = api.createStore(storage);
+  assert.equal(second.resolveRole('neighbour@EXAMPLE.com'), 'vendor');
+  assert.ok(!JSON.stringify(second.state.accountRoles).includes('password'));
+  const account = second.state.accountRoles.find(item => item.email === 'neighbour@example.com');
+  assert.deepEqual(Object.keys(account).sort(), ['email', 'role']);
+});
+
+test('an account has one remembered role even when email capitalization changes', () => {
+  const data = store();
+  data.rememberRole('person@example.com', 'student');
+  data.rememberRole('PERSON@example.com', 'vendor');
+  assert.equal(data.resolveRole('person@example.com'), 'vendor');
+  assert.equal(data.state.accountRoles.filter(item => item.email === 'person@example.com').length, 1);
+});
+
+test('invalid role registrations cannot persist an administrator or damage state', () => {
+  const data = store();
+  assert.equal(typeof data.rememberRole, 'function');
+  for (const [email, role] of [['admin@example.com', 'admin'], ['a@example.com', 'owner'], ['invalid', 'student'], ['', 'vendor'], [null, 'vendor']]) {
+    const before = snapshot(data);
+    assert.throws(() => data.rememberRole(email, role), /email|role|student|vendor/i);
+    assert.equal(snapshot(data), before);
+  }
+});
+
+test('saved state from before shared login gains role routing without losing reservations', () => {
+  const storage = memoryStorage();
+  const previous = api.createStore(storage);
+  previous.reserve('bag', 2);
+  previous.saveProfile('Jamie Lee', 'jamie@example.com');
+  const legacyState = JSON.parse(storage.getItem(api.STORAGE_KEY));
+  delete legacyState.accountRoles;
+  storage.setItem(api.STORAGE_KEY, JSON.stringify(legacyState));
+  const migrated = api.createStore(storage);
+  assert.equal(migrated.resolveRole('student@example.com'), 'student');
+  assert.equal(migrated.resolveRole('vendor@example.com'), 'vendor');
+  assert.equal(migrated.state.profile.email, 'jamie@example.com');
+  assert.equal(migrated.state.orders.length, 1);
+  assert.equal(migrated.state.listings.find(item => item.id === 'bag').quantity, 2);
+  migrated.rememberRole('new@example.com', 'vendor');
+  assert.equal(api.createStore(storage).resolveRole('new@example.com'), 'vendor');
+});
+
+test('malformed saved role hints cannot create an admin role or reset reservations', () => {
+  const storage = memoryStorage();
+  const first = api.createStore(storage);
+  first.reserve('bag', 1);
+  const saved = JSON.parse(storage.getItem(api.STORAGE_KEY));
+  saved.accountRoles = [
+    { email: 'admin@example.com', role: 'admin' },
+    { email: 'not-an-email', role: 'vendor' },
+    { email: 'KNOWN@example.com', role: 'vendor', password: 'must-not-be-kept' },
+    null
+  ];
+  storage.setItem(api.STORAGE_KEY, JSON.stringify(saved));
+  const reloaded = api.createStore(storage);
+  assert.equal(reloaded.resolveRole('admin@example.com'), null);
+  assert.equal(reloaded.resolveRole('known@example.com'), 'vendor');
+  assert.equal(reloaded.state.orders.length, 1);
+  assert.equal(reloaded.state.listings.find(item => item.id === 'bag').quantity, 3);
+  assert.ok(!storage.getItem(api.STORAGE_KEY).includes('must-not-be-kept'));
+  reloaded.reset();
+  assert.equal(reloaded.resolveRole('known@example.com'), null);
+  assert.equal(reloaded.resolveRole('vendor@example.com'), 'vendor');
+});
