@@ -1,3 +1,15 @@
+# FoodieNoms
+
+## Flutter Android application
+
+The mobile app requested for the client demo is in **[mobile/](mobile/)**. It uses **Flutter and Dart** and runs as an Android application, without embedding a website. See **[mobile setup and APK instructions](mobile/README.md)**.
+
+To download an Android APK after a successful build, open **[Actions → Build Android demo APK](https://github.com/Hollowlim/FoodieNoms/actions/workflows/android-demo.yml)** and download the **FoodieNoms-Android-APK** artifact.
+
+The earlier browser prototype remains below as a separate reference.
+
+---
+
 # FoodieNoms — client demo
 
 A responsive, interactive sample application based on the supplied FoodieNoms screenshots. Student and Vendor layouts adapt to mobile; Admin includes a desktop sidebar. Built with plain JavaScript and CSS, without dependency installation.
