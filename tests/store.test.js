@@ -1,0 +1,5 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {seed,reserve,cancel,collect} from '../src/store.js';
+test('reservation snapshots total, reduces stock and prevents overselling',()=>{const s=seed();const o=reserve(s,'bag',4);assert.equal(o.total,32);assert.equal(s.listings[0].quantity,0);assert.throws(()=>reserve(s,'bag',1));});
+test('cancellation restores stock only once',()=>{const s=seed();const o=reserve(s,'bag',2);cancel(s,o.id);assert.equal(s.listings[0].quantity,4);assert.throws(()=>cancel(s,o.id));});
+test('collection requires matching code and cannot be repeated',()=>{const s=seed();const o=reserve(s,'bag',1);assert.throws(()=>collect(s,o.id,'bad'));collect(s,o.id,o.code);assert.equal(o.status,'Collected');assert.throws(()=>collect(s,o.id,o.code));});
+test('pending vendor and hidden listings cannot be reserved',()=>{const s=seed();s.listings[0].vendorId='cafe';assert.throws(()=>reserve(s,'bag',1));s.listings[0].vendorId='bakery';s.listings[0].status='hidden';assert.throws(()=>reserve(s,'bag',1));});
