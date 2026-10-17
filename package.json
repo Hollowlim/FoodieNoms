@@ -7,7 +7,7 @@
     "dev": "node server.js",
     "start": "node server.js",
     "test": "node --test",
-    "check": "node --check src/app.js && node --check src/store.js && node --check server.js",
+    "check": "node --check fresh-webapp/app.js && node --check fresh-webapp/data.js && node --check fresh-webapp/preview.js && node --check fresh-webapp/sw.js && node --check server.js",
     "build": "node scripts/build.js"
   }
 }

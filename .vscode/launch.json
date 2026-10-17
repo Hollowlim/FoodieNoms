@@ -2,12 +2,11 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "FoodieNoms: open website demo",
+      "name": "FoodieNoms: device preview (start Live Server first)",
       "type": "pwa-chrome",
       "request": "launch",
-      "url": "http://localhost:3000",
-      "webRoot": "${workspaceFolder}",
-      "preLaunchTask": "Start FoodieNoms demo"
+      "url": "http://127.0.0.1:5500/preview.html",
+      "webRoot": "${workspaceFolder}"
     }
   ]
 }

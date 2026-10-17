@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "FoodieNoms \u2014 Save food. Save money.",
+  "short_name": "FoodieNoms",
+  "description": "Discover and reserve affordable surplus food in the Subang Jaya demo.",
+  "lang": "en-MY",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fcfaf5",
+  "theme_color": "#18543e",
+  "icons": [
+    {
+      "src": "./assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

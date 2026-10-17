@@ -1,0 +1,20 @@
+* { box-sizing: border-box; }
+body { margin:0; background:#e8e9e5; color:#24382d; font:14px Arial, sans-serif; height:100dvh; display:flex; flex-direction:column; }
+.preview-toolbar { background:#fffef9; border-bottom:1px solid #d6ddd2; padding:14px 24px; display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+.preview-toolbar strong { display:block; font-size:19px; color:#236541; }
+.preview-toolbar span { display:block; margin-top:4px; color:#718174; font-size:11px; }
+.preview-controls { display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; }
+label { display:grid; gap:5px; font-size:10px; color:#667669; }
+select,button,.preview-controls a { border:1px solid #d6ddd2; background:white; border-radius:7px; min-height:37px; padding:8px 12px; font:12px Arial,sans-serif; color:#24382d; }
+button { cursor:pointer; }
+.preview-controls a { text-decoration:none; background:#236541; color:white; display:flex; align-items:center; }
+button:focus-visible,select:focus-visible,a:focus-visible { outline:3px solid #8ba45a; outline-offset:2px; }
+#preview-stage { flex:1; min-height:180px; padding:18px; display:flex; align-items:flex-start; justify-content:center; overflow:auto; }
+#frame-space { flex-shrink:0; position:relative; }
+.device-frame { position:absolute; top:0; left:0; background:#17201b; box-shadow:0 12px 30px #243c302d,inset 0 0 0 2px #516057; transform-origin:top left; }
+iframe { display:block; border:0; background:#fcfaf5; }
+footer { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:10px 20px; font-size:10px; color:#667669; background:#fffef9; border-top:1px solid #d6ddd2; }
+@media(max-width:650px) { .preview-toolbar { padding:12px; gap:14px; }.preview-controls { gap:7px; }select,button,.preview-controls a { font-size:11px; padding:8px; } }
+/* Center fitting frames without losing the left edge of oversized 100% views. */
+#preview-stage { justify-content:flex-start; }
+#frame-space { margin-inline:auto; }
