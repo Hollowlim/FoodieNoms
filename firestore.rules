@@ -1,0 +1,122 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function admin() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    function validNewProfile(uid) {
+      let data = request.resource.data;
+      return signedIn() && request.auth.uid == uid &&
+        data.keys().hasAll(['name', 'role', 'approved', 'createdAt']) &&
+        data.keys().hasOnly(['name', 'role', 'approved', 'createdAt']) &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+        data.name.matches('.*[^ ].*') &&
+        data.role in ['customer', 'vendor'] && data.approved == false &&
+        data.createdAt == request.time;
+    }
+    function approveVendor() {
+      let data = request.resource.data;
+      return admin() && resource.data.role == 'vendor' &&
+        resource.data.approved == false && data.approved == true &&
+        data.approvedBy == request.auth.uid && data.approvedAt == request.time &&
+        data.diff(resource.data).affectedKeys().hasOnly(['approved', 'approvedBy', 'approvedAt']);
+    }
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || admin());
+      // An admin may query vendor applications, not the customer directory.
+      allow list: if admin() && resource.data.role == 'vendor';
+      allow create: if validNewProfile(uid);
+      allow update: if approveVendor();
+      allow delete: if false;
+    }
+    function hasRole(role) {
+      return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+    }
+    function approvedVendor(uid) {
+      let vendor = get(/databases/$(database)/documents/users/$(uid)).data;
+      return vendor.role == 'vendor' && vendor.approved == true;
+    }
+    function boundedText(value, max) {
+      return value is string && value.size() > 0 && value.size() <= max;
+    }
+    function validListing() {
+      let d = request.resource.data;
+      return signedIn() && d.vendorId == request.auth.uid && approvedVendor(request.auth.uid) &&
+        d.keys().hasAll(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','vendorId','vendorName','active','createdAt']) &&
+        d.keys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','vendorId','vendorName','active','createdAt']) &&
+        boundedText(d.title,100) && boundedText(d.description,1000) &&
+        boundedText(d.address,300) && boundedText(d.dietary,500) &&
+        d.category in ['Bakery','Meals','Pastries','Other'] &&
+        d.vendorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name &&
+        d.priceCents is int && d.priceCents > 0 && d.priceCents <= 1000000 &&
+        d.originalPriceCents is int && d.originalPriceCents >= d.priceCents && d.originalPriceCents <= 1000000 &&
+        d.stock is int && d.stock > 0 && d.stock <= 10000 &&
+        d.pickupStart is int && d.pickupEnd is int && d.pickupStart > request.time.toMillis() &&
+        d.pickupEnd > d.pickupStart && d.pickupEnd <= request.time.toMillis() + 2592000000 &&
+        d.active == true && d.createdAt == request.time;
+    }
+    function ownerToggle() {
+      let d = request.resource.data;
+      return signedIn() && resource.data.vendorId == request.auth.uid && approvedVendor(request.auth.uid) &&
+        d.active is bool && d.diff(resource.data).affectedKeys().hasOnly(['active']) &&
+        (d.active == false || resource.data.pickupEnd > request.time.toMillis());
+    }
+    function inventoryReservation(listingId) {
+      let d = request.resource.data;
+      let orderId = d.lastReservationId;
+      let order = getAfter(/databases/$(database)/documents/reservations/$(orderId)).data;
+      return hasRole('customer') &&
+        d.diff(resource.data).affectedKeys().hasOnly(['stock','lastReservationId']) &&
+        !exists(/databases/$(database)/documents/reservations/$(orderId)) &&
+        order.customerId == request.auth.uid && order.listingId == listingId &&
+        order.quantity is int && order.quantity > 0 && order.quantity <= 100 &&
+        d.stock is int && d.stock == resource.data.stock - order.quantity && d.stock >= 0 &&
+        order.createdAt == request.time;
+    }
+    match /listings/{id} {
+      allow get: if signedIn() && (!exists(/databases/$(database)/documents/listings/$(id)) ||
+        resource.data.active == true || resource.data.vendorId == request.auth.uid || admin());
+      allow list: if signedIn() && (resource.data.active == true || resource.data.vendorId == request.auth.uid || admin());
+      allow create: if validListing();
+      allow update: if ownerToggle() || inventoryReservation(id);
+      allow delete: if false;
+    }
+    function validReservation(id) {
+      let d = request.resource.data;
+      let listing = get(/databases/$(database)/documents/listings/$(d.listingId)).data;
+      let nextListing = getAfter(/databases/$(database)/documents/listings/$(d.listingId)).data;
+      return hasRole('customer') && id.matches('FN-[A-F0-9]{20}') && d.code == id &&
+        d.keys().hasAll(['customerId','vendorId','listingId','title','vendorName','address','pickupStart','pickupEnd','quantity','unitPriceCents','totalCents','status','code','paymentStatus','createdAt']) &&
+        d.keys().hasOnly(['customerId','vendorId','listingId','title','vendorName','address','pickupStart','pickupEnd','quantity','unitPriceCents','totalCents','status','code','paymentStatus','createdAt']) &&
+        d.customerId == request.auth.uid && d.vendorId == listing.vendorId && approvedVendor(listing.vendorId) &&
+        d.title == listing.title && d.vendorName == listing.vendorName && d.address == listing.address &&
+        d.pickupStart is int && d.pickupEnd is int &&
+        d.pickupStart == listing.pickupStart && d.pickupEnd == listing.pickupEnd &&
+        d.quantity is int && d.quantity > 0 && d.quantity <= 100 &&
+        d.unitPriceCents is int && d.totalCents is int &&
+        d.unitPriceCents == listing.priceCents && d.totalCents == listing.priceCents * d.quantity &&
+        d.status == 'reserved' && d.paymentStatus == 'unpaid' && d.createdAt == request.time &&
+        listing.active == true && listing.pickupEnd > request.time.toMillis() &&
+        nextListing.stock == listing.stock - d.quantity && nextListing.stock >= 0 &&
+        nextListing.lastReservationId == id &&
+        nextListing.diff(listing).affectedKeys().hasOnly(['stock','lastReservationId']);
+    }
+    function validCollection() {
+      let d = request.resource.data;
+      return signedIn() && approvedVendor(request.auth.uid) && resource.data.vendorId == request.auth.uid &&
+        resource.data.status == 'reserved' && d.status == 'collected' && d.collectedAt == request.time &&
+        d.diff(resource.data).affectedKeys().hasOnly(['status','collectedAt']);
+    }
+    match /reservations/{id} {
+      allow get: if signedIn() && (!exists(/databases/$(database)/documents/reservations/$(id)) ||
+        resource.data.customerId == request.auth.uid || resource.data.vendorId == request.auth.uid || admin());
+      allow list: if signedIn() && (resource.data.customerId == request.auth.uid || resource.data.vendorId == request.auth.uid || admin());
+      allow create: if validReservation(id);
+      allow update: if validCollection();
+      allow delete: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

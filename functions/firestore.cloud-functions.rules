@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function admin() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || admin());
+      allow write: if false;
+    }
+    match /listings/{id} {
+      allow read: if signedIn() && (resource.data.active == true ||
+        resource.data.vendorId == request.auth.uid || admin());
+      allow write: if false;
+    }
+    match /reservations/{id} {
+      allow read: if signedIn() && (resource.data.customerId == request.auth.uid ||
+        resource.data.vendorId == request.auth.uid || admin());
+      allow write: if false;
+    }
+    // Profiles, prices, inventory and collection state are written by trusted
+    // callable functions only. Pickup lookup documents are never client-readable.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

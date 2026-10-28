@@ -1,0 +1,39 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": true
+    },
+    "singleProjectMode": true
+  },
+  "flutter": {
+    "platforms": {
+      "ios": {
+        "default": {
+          "projectId": "foodienoms-42a7d",
+          "appId": "1:147132151155:ios:62d15b6505d873d697c106",
+          "uploadDebugSymbols": false,
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "foodienoms-42a7d",
+          "configurations": {
+            "ios": "1:147132151155:ios:62d15b6505d873d697c106",
+            "web": "1:147132151155:web:d76eb0f18d9bc37097c106"
+          }
+        }
+      }
+    }
+  }
+}

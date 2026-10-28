@@ -1,0 +1,67 @@
+{
+  "source": "Figma metadata (retrieved 2026-10-27), original web app ZIP uploaded by user",
+  "figma_file_url": "https://www.figma.com/design/AthrFGHOcn4U7G1Fiu4oZY/FoodieNoms-%7C-Group-39-%7C-Student-Vendor-Admin-Prototype?node-id=0-1",
+  "important": "NO Figma screenshots were exported. Figma connector reached plan limit. Wireframes are derived only from visible frame metadata and should NOT be treated as pixel-accurate Figma images.",
+  "confirmed_figma_frames": [
+    {
+      "id": "1:2",
+      "name": "01 Student - Discover Deals",
+      "size": [
+        390,
+        790
+      ]
+    },
+    {
+      "id": "1:26",
+      "name": "02 Student - Food Details",
+      "size": [
+        390,
+        790
+      ]
+    },
+    {
+      "id": "1:40",
+      "name": "03 Student - Reservation",
+      "size": [
+        390,
+        790
+      ]
+    },
+    {
+      "id": "1:56",
+      "name": "04 Vendor - Dashboard",
+      "size": [
+        390,
+        790
+      ]
+    },
+    {
+      "id": "1:75",
+      "name": "05 Vendor - Add Listing",
+      "size": [
+        390,
+        790
+      ]
+    },
+    {
+      "id": "1:98",
+      "name": "06 Admin - Web Dashboard",
+      "size": [
+        960,
+        790
+      ]
+    }
+  ],
+  "media_provenance": {
+    "01_original_web_prototype_screens": "Actual PNG screenshots included in previously uploaded FoodieNoms-main.zip (browser demo, not original Figma)",
+    "02_figma_structure_wireframes_NOT_EXPORTS": "New illustrative structure wireframes constructed from six verified frame names and inner node names; colors are estimated from FoodieNoms development guide; not exact Figma exports",
+    "03_brand_assets": "User-provided official logo and browser demo assets from uploaded files"
+  },
+  "implementation_stack": "Flutter (Dart) for Student/Vendor mobile; Flutter Web for Admin; Supabase planned (not wired in local demo)",
+  "caveats": [
+    "Browser demo uses localStorage and sample login; do not claim real authentication",
+    "Do not imply payment/delivery/AI exists",
+    "Do not copy wireframe as an exact Figma screenshot",
+    "Figma frames beyond the six confirmed in the metadata could not be enumerated due plan limit"
+  ]
+}
