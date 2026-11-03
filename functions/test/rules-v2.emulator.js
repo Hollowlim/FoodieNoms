@@ -63,3 +63,21 @@ test('listings may name a preset photo and nothing else', async () => {
     await assertFails(updateDoc(ref('photo'), {imageKey}));
   }
 });
+const collected = {status: 'collected', collectedAt: serverTimestamp()};
+const seedOrder = (id, pickupStart, pickupEnd) => seed('reservations/' + id, {customerId: 'customer', vendorId: 'vendor', listingId: 'seeded',
+  title: 'Lunch box', vendorName: 'Subang Cafe', address: '1 Test Street', pickupStart, pickupEnd, quantity: 1, unitPriceCents: 800,
+  totalCents: 800, status: 'reserved', code: id, paymentStatus: 'unpaid', createdAt: new Date()});
+test('collection is limited to the pickup window plus the grace period', async () => {
+  const now = Date.now();
+  const cases = [
+    ['FN-WINDOW-OPEN', now - HOUR, now + HOUR, true],
+    ['FN-JUST-EARLY', now + 10 * MINUTE, now + HOUR, true],
+    ['FN-JUST-LATE', now - HOUR, now - 10 * MINUTE, true],
+    ['FN-TOO-EARLY', now + 20 * MINUTE, now + HOUR, false],
+    ['FN-TOO-LATE', now - HOUR, now - 20 * MINUTE, false]];
+  for (const [id, start, end, allowed] of cases) {
+    await seedOrder(id, start, end);
+    const attempt = updateDoc(doc(client('vendor'), 'reservations', id), collected);
+    await (allowed ? assertSucceeds(attempt) : assertFails(attempt));
+  }
+});

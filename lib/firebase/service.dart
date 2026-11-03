@@ -2,6 +2,9 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+/// Mirrors pickupGraceMs() in firestore.rules.
+const pickupGraceMs = 15 * 60 * 1000;
+
 class FoodieService {
   final auth = FirebaseAuth.instance;
   final db = FirebaseFirestore.instance;
@@ -169,6 +172,13 @@ class FoodieService {
       }
       if (value['status'] != 'reserved') {
         throw StateError('This pickup was already collected.');
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now < (value['pickupStart'] as int) - pickupGraceMs) {
+        throw StateError('This pickup window has not opened yet.');
+      }
+      if (now > (value['pickupEnd'] as int) + pickupGraceMs) {
+        throw StateError('This pickup window has ended.');
       }
       tx.update(ref,
           {'status': 'collected', 'collectedAt': FieldValue.serverTimestamp()});

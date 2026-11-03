@@ -116,10 +116,14 @@ service cloud.firestore {
         nextListing.lastReservationId == id &&
         nextListing.diff(listing).affectedKeys().hasOnly(['stock','lastReservationId']);
     }
+    // Grace period either side of the window; 15 minutes until agreed with TBS.
+    function pickupGraceMs() { return 900000; }
     function validCollection() {
       let d = request.resource.data;
       return signedIn() && approvedVendor(request.auth.uid) && resource.data.vendorId == request.auth.uid &&
         resource.data.status == 'reserved' && d.status == 'collected' && d.collectedAt == request.time &&
+        request.time.toMillis() >= resource.data.pickupStart - pickupGraceMs() &&
+        request.time.toMillis() <= resource.data.pickupEnd + pickupGraceMs() &&
         d.diff(resource.data).affectedKeys().hasOnly(['status','collectedAt']);
     }
     match /reservations/{id} {
