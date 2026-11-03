@@ -158,7 +158,8 @@ class FoodieService {
       final claim = listing.collection('claims').doc(uid);
       final held = ((await tx.get(claim)).data()?['quantity'] as int?) ?? 0;
       if (held + quantity > maxPerCustomer) {
-        throw StateError('You can reserve at most $maxPerCustomer of this item.');
+        throw StateError(
+            'You can reserve at most $maxPerCustomer of this item.');
       }
       tx.set(order, {
         'customerId': uid,

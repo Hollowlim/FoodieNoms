@@ -1,5 +1,6 @@
 // Runs the real FoodieService against the rules on local emulators and prints
 // results to the browser console. Use tool/run_client_emulator_check.sh.
+// ignore_for_file: avoid_print
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -71,8 +72,8 @@ Future<void> journey() async {
   expectEqual((await db.doc('listings/$listingId').get()).data()!['stock'], 18);
   await signIn('vendor@example.test');
   await service.call('collectReservation', {'code': code});
-  expectEqual(
-      (await db.doc('reservations/$code').get()).data()!['status'], 'collected');
+  expectEqual((await db.doc('reservations/$code').get()).data()!['status'],
+      'collected');
   await expectStateError(
       service.call('collectReservation', {'code': code}), 'already collected');
 }

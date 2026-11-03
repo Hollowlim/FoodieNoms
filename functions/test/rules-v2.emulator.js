@@ -192,6 +192,17 @@ test('an attacker cannot use another student order to move stock or allowance', 
   await assertFails(updateDoc(doc(db, 'listings/victim'), {stock: increment(2), lastReleaseId: id}));
   await assertFails(updateDoc(doc(db, 'listings/victim/claims/other-customer'), {quantity: increment(-2), lastReleaseId: id}));
   assert.equal(await heldBy('other-customer', 'victim'), 5);
+  // Cancelling your own order cannot free up another student's allowance.
+  await seed('listings/victim-2', listing());
+  const mine = await reserve('other-customer', 'victim-2', 2);
+  await reserve('customer', 'victim-2', 2);
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'reservations', mine), cancelled('other-customer'));
+  batch.update(doc(db, 'listings/victim-2'), {stock: increment(2), lastReleaseId: mine});
+  batch.update(doc(db, 'listings/victim-2/claims/other-customer'), {quantity: increment(-2), lastReleaseId: mine});
+  batch.update(doc(db, 'listings/victim-2/claims/customer'), {quantity: increment(-2), lastReleaseId: mine});
+  await assertFails(batch.commit());
+  assert.equal(await heldBy('customer', 'victim-2'), 2);
 });
 test('students cancel only until the window ends; vendors can clear no-shows later', async () => {
   const start = Date.now() + 10 * MINUTE;
