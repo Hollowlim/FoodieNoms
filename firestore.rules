@@ -41,21 +41,32 @@ service cloud.firestore {
     function boundedText(value, max) {
       return value is string && value.size() > 0 && value.size() <= max;
     }
+    function validDetails(d) {
+      return boundedText(d.title,100) && boundedText(d.description,1000) &&
+        boundedText(d.address,300) && boundedText(d.dietary,500) &&
+        d.category in ['Bakery','Meals','Pastries','Other'] &&
+        d.priceCents is int && d.priceCents > 0 && d.priceCents <= 1000000 &&
+        d.originalPriceCents is int && d.originalPriceCents >= d.priceCents && d.originalPriceCents <= 1000000 &&
+        d.stock is int && d.stock <= 10000 &&
+        d.pickupStart is int && d.pickupEnd is int &&
+        d.pickupEnd > d.pickupStart && d.pickupEnd <= request.time.toMillis() + 2592000000;
+    }
     function validListing() {
       let d = request.resource.data;
       return signedIn() && d.vendorId == request.auth.uid && approvedVendor(request.auth.uid) &&
         d.keys().hasAll(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','vendorId','vendorName','active','createdAt']) &&
         d.keys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','vendorId','vendorName','active','createdAt']) &&
-        boundedText(d.title,100) && boundedText(d.description,1000) &&
-        boundedText(d.address,300) && boundedText(d.dietary,500) &&
-        d.category in ['Bakery','Meals','Pastries','Other'] &&
+        validDetails(d) &&
         d.vendorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name &&
-        d.priceCents is int && d.priceCents > 0 && d.priceCents <= 1000000 &&
-        d.originalPriceCents is int && d.originalPriceCents >= d.priceCents && d.originalPriceCents <= 1000000 &&
-        d.stock is int && d.stock > 0 && d.stock <= 10000 &&
-        d.pickupStart is int && d.pickupEnd is int && d.pickupStart > request.time.toMillis() &&
-        d.pickupEnd > d.pickupStart && d.pickupEnd <= request.time.toMillis() + 2592000000 &&
+        d.stock > 0 && d.pickupStart > request.time.toMillis() &&
         d.active == true && d.createdAt == request.time;
+    }
+    // Existing orders keep their own snapshot, so edits never change them.
+    function ownerEdit() {
+      let d = request.resource.data;
+      return signedIn() && resource.data.vendorId == request.auth.uid && approvedVendor(request.auth.uid) &&
+        d.diff(resource.data).affectedKeys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd']) &&
+        validDetails(d) && d.stock >= 0 && d.pickupEnd > request.time.toMillis();
     }
     function ownerToggle() {
       let d = request.resource.data;
@@ -80,7 +91,7 @@ service cloud.firestore {
         resource.data.active == true || resource.data.vendorId == request.auth.uid || admin());
       allow list: if signedIn() && (resource.data.active == true || resource.data.vendorId == request.auth.uid || admin());
       allow create: if validListing();
-      allow update: if ownerToggle() || inventoryReservation(id);
+      allow update: if ownerToggle() || ownerEdit() || inventoryReservation(id);
       allow delete: if false;
     }
     function validReservation(id) {

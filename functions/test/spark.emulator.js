@@ -57,8 +57,7 @@ test('only approved vendors publish validated listings',async()=>{
    await assertFails(setDoc(doc(client('vendor'),'listings','bad-'+i),listing(patch)));
  }
  await assertFails(updateDoc(doc(client('other-vendor'),'listings','last-item'),{active:false}));
- await assertFails(updateDoc(doc(client('vendor'),'listings','last-item'),{stock:100}));
- await assertFails(updateDoc(doc(client('vendor'),'listings','last-item'),{priceCents:1}));
+ await assertFails(updateDoc(doc(client('other-vendor'),'listings','last-item'),{priceCents:1}));
 });
 test('concurrent customers cannot oversell; retries return the same order',async()=>{
  const result=await Promise.allSettled([reserve('customer','last-item',code(1)),reserve('other-customer','last-item',code(2))]);
