@@ -33,12 +33,32 @@ class FoodieService {
     });
   }
 
+  /// Web transactions rethrow errors as an untyped JS object, which would hide
+  /// the message from [firebaseMessage], so the original error is kept here.
+  Future<T> _transact<T>(Future<T> Function(Transaction tx) handler) async {
+    StateError? failure;
+    try {
+      return await db.runTransaction((tx) async {
+        failure = null;
+        try {
+          return await handler(tx);
+        } on StateError catch (error) {
+          failure = error;
+          rethrow;
+        }
+      });
+    } catch (_) {
+      if (failure != null) throw failure!;
+      rethrow;
+    }
+  }
+
   Future<void> approveVendor(String vendorId) async {
     final user = auth.currentUser;
     if (user == null) throw StateError('Please sign in first.');
     final actor = db.collection('users').doc(user.uid);
     final target = db.collection('users').doc(vendorId);
-    await db.runTransaction((transaction) async {
+    await _transact((transaction) async {
       final profile = await transaction.get(actor);
       final vendor = await transaction.get(target);
       if (profile.data()?['role'] != 'admin') {
@@ -76,7 +96,7 @@ class FoodieService {
   Future<Map<String, dynamic>> _publish(Map<String, dynamic> data) async {
     final uid = _uid;
     final ref = db.collection('listings').doc();
-    await db.runTransaction((tx) async {
+    await _transact((tx) async {
       final profile = await tx.get(db.collection('users').doc(uid));
       final vendor = profile.data();
       if (vendor?['role'] != 'vendor' || vendor?['approved'] != true) {
@@ -113,7 +133,7 @@ class FoodieService {
     final code = 'FN-${key.substring(0, 20).toUpperCase()}';
     final order = db.collection('reservations').doc(code);
     final listing = db.collection('listings').doc(data['listingId'] as String);
-    return db.runTransaction((tx) async {
+    return _transact((tx) async {
       final previous = await tx.get(order);
       if (previous.exists) {
         final old = previous.data()!;
@@ -174,7 +194,7 @@ class FoodieService {
       throw StateError('Enter the complete pickup code shown in My Pickups.');
     }
     final ref = db.collection('reservations').doc(code);
-    await db.runTransaction((tx) async {
+    await _transact((tx) async {
       final order = await tx.get(ref);
       final value = order.data();
       if (value == null || value['vendorId'] != uid) {
