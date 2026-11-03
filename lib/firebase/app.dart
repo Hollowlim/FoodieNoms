@@ -292,7 +292,8 @@ class _AuthScreenState extends State<AuthScreen> {
                         decoration: InputDecoration(
                             labelText:
                                 register ? 'Email' : 'Email or username'),
-                        validator: (v) => !register && _adminDemoUsername.isNotEmpty &&
+                        validator: (v) => !register &&
+                                _adminDemoUsername.isNotEmpty &&
                                 _adminDemoPassword.isNotEmpty &&
                                 v?.trim() == _adminDemoUsername
                             ? null
@@ -1261,12 +1262,15 @@ class _PublishScreenState extends State<PublishScreen> {
 
   Future<void> publish() async {
     if (!form.currentState!.validate()) return;
+    // Mirrors the five-minute allowance in firestore.rules.
+    final now = DateTime.now();
     if (start == null ||
         end == null ||
-        !start!.isAfter(DateTime.now()) ||
-        !end!.isAfter(start!)) {
-      setState(
-          () => error = 'Choose a future pickup start and a later end time.');
+        start!.isBefore(now.subtract(const Duration(minutes: 5))) ||
+        !end!.isAfter(start!) ||
+        !end!.isAfter(now)) {
+      setState(() => error =
+          'Choose a pickup start from now onwards and a later end time.');
       return;
     }
     setState(() {

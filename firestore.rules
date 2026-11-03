@@ -60,7 +60,9 @@ service cloud.firestore {
         d.keys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','vendorId','vendorName','active','createdAt','imageKey']) &&
         validDetails(d) &&
         d.vendorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name &&
-        d.stock > 0 && d.pickupStart > request.time.toMillis() &&
+        // Vendors publish close to closing time, so a window may start now.
+        d.stock > 0 && d.pickupStart >= request.time.toMillis() - 300000 &&
+        d.pickupEnd > request.time.toMillis() &&
         d.active == true && d.createdAt == request.time;
     }
     // Existing orders keep their own snapshot, so edits never change them.

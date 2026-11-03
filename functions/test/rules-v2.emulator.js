@@ -225,3 +225,11 @@ test('orders can be cancelled after pausing, and older orders without a claim st
   await assertSucceeds(cancel('customer', legacy, 'legacy', 2, 'customer', {skipClaim: true}));
   assert.equal(await stockOf('legacy'), 22);
 });
+test('a listing may open for pickup immediately, but not in the past', async () => {
+  const ref = id => doc(client('vendor'), 'listings', id);
+  await assertSucceeds(setDoc(ref('open-now'), listing({pickupStart: Date.now() - MINUTE})));
+  await assertFails(setDoc(ref('too-old'), listing({pickupStart: Date.now() - 10 * MINUTE})));
+  await assertFails(setDoc(ref('already-ended'), listing({pickupStart: Date.now() - 2 * MINUTE, pickupEnd: Date.now() - MINUTE})));
+  const id = await reserve('customer', 'open-now', 1);
+  await assertSucceeds(updateDoc(doc(client('vendor'), 'reservations', id), collected));
+});
