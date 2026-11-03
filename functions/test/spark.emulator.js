@@ -23,8 +23,11 @@ async function reserve(uid,id,orderId) {
     const snapshot=await tx.get(listingRef), deal=snapshot.data();
     if(deal.stock<1) throw new Error('Sold out');
     const data={...snapshotOrder(uid,id,deal),code:orderId};
+    const claimRef=doc(db,'listings',id,'claims',uid);
+    const held=(await tx.get(claimRef)).data()?.quantity??0;
     tx.set(orderRef,data);
     tx.update(listingRef,{stock:deal.stock-1,lastReservationId:orderId});
+    tx.set(claimRef,{quantity:held+1,lastReservationId:orderId},{merge:true});
     return data;
   });
 }
@@ -33,6 +36,7 @@ async function forge(id,orderId,patch={},listingPatch={}) {
   const batch=writeBatch(db);
   batch.set(doc(db,'reservations',orderId),{...snapshotOrder('customer',id,deal),code:orderId,...patch});
   batch.update(doc(db,'listings',id),{stock:deal.stock-1,lastReservationId:orderId,...listingPatch});
+  batch.set(doc(db,'listings',id,'claims','customer'),{quantity:1,lastReservationId:orderId});
   return batch.commit();
 }
 before(async()=>{

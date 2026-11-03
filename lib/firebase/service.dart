@@ -5,6 +5,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 /// Mirrors pickupGraceMs() in firestore.rules.
 const pickupGraceMs = 15 * 60 * 1000;
 
+/// Mirrors maxPerCustomer() in firestore.rules.
+const maxPerCustomer = 5;
+
 class FoodieService {
   final auth = FirebaseAuth.instance;
   final db = FirebaseFirestore.instance;
@@ -129,8 +132,13 @@ class FoodieService {
           (deal['pickupEnd'] as int) <= DateTime.now().millisecondsSinceEpoch) {
         throw StateError('This listing is no longer available.');
       }
-      if (quantity < 1 || quantity > 100 || (deal['stock'] as int) < quantity) {
+      if (quantity < 1 || (deal['stock'] as int) < quantity) {
         throw StateError('Not enough stock remains for this quantity.');
+      }
+      final claim = listing.collection('claims').doc(uid);
+      final held = ((await tx.get(claim)).data()?['quantity'] as int?) ?? 0;
+      if (held + quantity > maxPerCustomer) {
+        throw StateError('You can reserve at most $maxPerCustomer of this item.');
       }
       tx.set(order, {
         'customerId': uid,
@@ -153,6 +161,8 @@ class FoodieService {
         'stock': (deal['stock'] as int) - quantity,
         'lastReservationId': code
       });
+      tx.set(claim, {'quantity': held + quantity, 'lastReservationId': code},
+          SetOptions(merge: true));
       return {'id': code, 'code': code};
     });
   }

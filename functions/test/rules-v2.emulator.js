@@ -2,7 +2,7 @@ const {test, before, after} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
-const {doc, getDoc, setDoc, updateDoc, serverTimestamp} = require('firebase/firestore');
+const {doc, getDoc, setDoc, updateDoc, runTransaction, writeBatch, serverTimestamp} = require('firebase/firestore');
 if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Use only the Firestore emulator.');
 const MINUTE = 60000, HOUR = 60 * MINUTE;
 let env;
@@ -80,4 +80,60 @@ test('collection is limited to the pickup window plus the grace period', async (
     const attempt = updateDoc(doc(client('vendor'), 'reservations', id), collected);
     await (allowed ? assertSucceeds(attempt) : assertFails(attempt));
   }
+});
+let nextCode = 0;
+const code = () => 'FN-' + (++nextCode).toString(16).toUpperCase().padStart(20, 'A');
+const orderFor = (uid, listingId, deal, id, quantity) => ({customerId: uid, vendorId: deal.vendorId, listingId, title: deal.title,
+  vendorName: deal.vendorName, address: deal.address, pickupStart: deal.pickupStart, pickupEnd: deal.pickupEnd, quantity,
+  unitPriceCents: deal.priceCents, totalCents: deal.priceCents * quantity, status: 'reserved', code: id,
+  paymentStatus: 'unpaid', createdAt: serverTimestamp()});
+function reserve(uid, listingId, quantity, id = code()) {
+  const db = client(uid);
+  return runTransaction(db, async tx => {
+    const listingRef = doc(db, 'listings', listingId), claimRef = doc(db, 'listings', listingId, 'claims', uid);
+    const deal = (await tx.get(listingRef)).data();
+    const held = (await tx.get(claimRef)).data()?.quantity ?? 0;
+    tx.set(doc(db, 'reservations', id), orderFor(uid, listingId, deal, id, quantity));
+    tx.update(listingRef, {stock: deal.stock - quantity, lastReservationId: id});
+    tx.set(claimRef, {quantity: held + quantity, lastReservationId: id}, {merge: true});
+    return id;
+  });
+}
+const heldBy = async (uid, listingId) => (await getDoc(doc(client(uid), 'listings', listingId, 'claims', uid))).data()?.quantity;
+test('each student can hold at most five of a listing across orders', async () => {
+  await seed('listings/cap', listing());
+  await assertFails(reserve('customer', 'cap', 6));
+  await assertSucceeds(reserve('customer', 'cap', 3));
+  await assertSucceeds(reserve('customer', 'cap', 2));
+  assert.equal(await heldBy('customer', 'cap'), 5);
+  await assertFails(reserve('customer', 'cap', 1));
+  await assertSucceeds(reserve('other-customer', 'cap', 5));
+  assert.equal((await getDoc(doc(client('vendor'), 'listings/cap'))).data().stock, 10);
+  await seed('listings/cap-2', listing());
+  await assertSucceeds(reserve('customer', 'cap-2', 5));
+});
+test('the claim total cannot be skipped or forged', async () => {
+  await seed('listings/claim', listing());
+  const db = client('customer'), deal = (await getDoc(doc(db, 'listings/claim'))).data();
+  const ref = doc(db, 'listings/claim/claims/customer');
+  // Order and stock change with no claim, or with an understated one.
+  for (const claim of [null, {quantity: 0}, {quantity: 1}]) {
+    const id = code(), batch = writeBatch(db);
+    batch.set(doc(db, 'reservations', id), orderFor('customer', 'claim', deal, id, 2));
+    batch.update(doc(db, 'listings/claim'), {stock: deal.stock - 2, lastReservationId: id});
+    if (claim) batch.set(ref, {...claim, lastReservationId: id});
+    await assertFails(batch.commit());
+  }
+  await assertSucceeds(reserve('customer', 'claim', 5));
+  await assertFails(setDoc(ref, {quantity: 0, lastReservationId: 'x'}));
+  await assertFails(updateDoc(ref, {quantity: 0}));
+  await assertFails(setDoc(doc(client('other-customer'), 'listings/claim/claims/customer'), {quantity: 0, lastReservationId: 'x'}));
+  await assertFails(getDoc(doc(client('other-customer'), 'listings/claim/claims/customer')));
+});
+test('concurrent orders by one student cannot pass the limit', async () => {
+  await seed('listings/race', listing());
+  const results = await Promise.allSettled([reserve('customer', 'race', 3), reserve('customer', 'race', 3), reserve('customer', 'race', 3)]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(await heldBy('customer', 'race'), 3);
+  assert.equal((await getDoc(doc(client('vendor'), 'listings/race'))).data().stock, 17);
 });

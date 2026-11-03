@@ -76,6 +76,26 @@ service cloud.firestore {
         d.active is bool && d.diff(resource.data).affectedKeys().hasOnly(['active']) &&
         (d.active == false || resource.data.pickupEnd > request.time.toMillis());
     }
+    // Per student, per listing; 5 until agreed with TBS. Rules cannot count orders,
+    // so listings/{id}/claims/{uid} keeps the running total of held items.
+    function maxPerCustomer() { return 5; }
+    function claimBefore(listingId, uid) {
+      let claim = /databases/$(database)/documents/listings/$(listingId)/claims/$(uid);
+      return exists(claim) ? get(claim).data.quantity : 0;
+    }
+    function claimAfter(listingId, uid) {
+      return getAfter(/databases/$(database)/documents/listings/$(listingId)/claims/$(uid)).data.quantity;
+    }
+    function claimReservation(listingId, uid) {
+      let d = request.resource.data;
+      let orderId = d.lastReservationId;
+      let order = getAfter(/databases/$(database)/documents/reservations/$(orderId)).data;
+      return signedIn() && request.auth.uid == uid && hasRole('customer') &&
+        !exists(/databases/$(database)/documents/reservations/$(orderId)) &&
+        order.customerId == uid && order.listingId == listingId &&
+        d.quantity is int && d.quantity == claimBefore(listingId, uid) + order.quantity &&
+        d.quantity <= maxPerCustomer();
+    }
     function inventoryReservation(listingId) {
       let d = request.resource.data;
       let orderId = d.lastReservationId;
@@ -84,7 +104,7 @@ service cloud.firestore {
         d.diff(resource.data).affectedKeys().hasOnly(['stock','lastReservationId']) &&
         !exists(/databases/$(database)/documents/reservations/$(orderId)) &&
         order.customerId == request.auth.uid && order.listingId == listingId &&
-        order.quantity is int && order.quantity > 0 && order.quantity <= 100 &&
+        order.quantity is int && order.quantity > 0 && order.quantity <= maxPerCustomer() &&
         d.stock is int && d.stock == resource.data.stock - order.quantity && d.stock >= 0 &&
         order.createdAt == request.time;
     }
@@ -95,6 +115,12 @@ service cloud.firestore {
       allow create: if validListing();
       allow update: if ownerToggle() || ownerEdit() || inventoryReservation(id);
       allow delete: if false;
+      match /claims/{uid} {
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow create: if claimReservation(id, uid) && request.resource.data.keys().hasOnly(['quantity','lastReservationId']);
+        allow update: if claimReservation(id, uid) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity','lastReservationId']);
+      }
     }
     function validReservation(id) {
       let d = request.resource.data;
@@ -107,7 +133,8 @@ service cloud.firestore {
         d.title == listing.title && d.vendorName == listing.vendorName && d.address == listing.address &&
         d.pickupStart is int && d.pickupEnd is int &&
         d.pickupStart == listing.pickupStart && d.pickupEnd == listing.pickupEnd &&
-        d.quantity is int && d.quantity > 0 && d.quantity <= 100 &&
+        d.quantity is int && d.quantity > 0 && d.quantity <= maxPerCustomer() &&
+        claimAfter(d.listingId, d.customerId) == claimBefore(d.listingId, d.customerId) + d.quantity &&
         d.unitPriceCents is int && d.totalCents is int &&
         d.unitPriceCents == listing.priceCents && d.totalCents == listing.priceCents * d.quantity &&
         d.status == 'reserved' && d.paymentStatus == 'unpaid' && d.createdAt == request.time &&
