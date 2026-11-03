@@ -2,7 +2,7 @@ const {test, before, after} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
-const {doc, getDoc, setDoc, updateDoc, runTransaction, writeBatch, serverTimestamp} = require('firebase/firestore');
+const {doc, getDoc, setDoc, updateDoc, runTransaction, writeBatch, increment, serverTimestamp} = require('firebase/firestore');
 if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Use only the Firestore emulator.');
 const MINUTE = 60000, HOUR = 60 * MINUTE;
 let env;
@@ -136,4 +136,81 @@ test('concurrent orders by one student cannot pass the limit', async () => {
   assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
   assert.equal(await heldBy('customer', 'race'), 3);
   assert.equal((await getDoc(doc(client('vendor'), 'listings/race'))).data().stock, 17);
+});
+const cancelled = uid => ({status: 'cancelled', cancelledAt: serverTimestamp(), cancelledBy: uid});
+// Uses increment so a student can cancel after the vendor has paused the listing.
+function cancel(uid, id, listingId, quantity, customer = uid, patch = {}) {
+  const db = client(uid), batch = writeBatch(db);
+  batch.update(doc(db, 'reservations', id), {...cancelled(uid), ...patch.order});
+  batch.update(doc(db, 'listings', listingId), {stock: increment(patch.stock ?? quantity), lastReleaseId: patch.releaseId ?? id});
+  if (!patch.skipClaim) batch.update(doc(db, 'listings', listingId, 'claims', customer), {quantity: increment(-(patch.claim ?? quantity)), lastReleaseId: patch.releaseId ?? id});
+  return batch.commit();
+}
+const stockOf = async id => (await getDoc(doc(client('vendor'), 'listings', id))).data().stock;
+test('students cancel their own order and get their allowance back', async () => {
+  await seed('listings/undo', listing());
+  const id = await reserve('customer', 'undo', 5);
+  assert.equal(await stockOf('undo'), 15);
+  await assertSucceeds(cancel('customer', id, 'undo', 5));
+  assert.equal(await stockOf('undo'), 20);
+  assert.equal(await heldBy('customer', 'undo'), 0);
+  const order = (await getDoc(doc(client('customer'), 'reservations', id))).data();
+  assert.equal(order.status, 'cancelled');
+  assert.equal(order.cancelledBy, 'customer');
+  await assertFails(cancel('customer', id, 'undo', 5));
+  assert.equal(await stockOf('undo'), 20);
+  await assertFails(updateDoc(doc(client('vendor'), 'reservations', id), collected));
+  await assertSucceeds(reserve('customer', 'undo', 5));
+});
+test('only the student or owning vendor can cancel an order', async () => {
+  await seed('listings/who', listing());
+  const id = await reserve('customer', 'who', 2);
+  for (const uid of ['other-customer', 'other-vendor', 'pending']) await assertFails(cancel(uid, id, 'who', 2, 'customer'));
+  await assertSucceeds(cancel('vendor', id, 'who', 2, 'customer'));
+  assert.equal((await getDoc(doc(client('customer'), 'reservations', id))).data().cancelledBy, 'vendor');
+  assert.equal(await heldBy('customer', 'who'), 0);
+});
+test('cancelling cannot create stock or change the order', async () => {
+  await seed('listings/forge', listing());
+  const id = await reserve('customer', 'forge', 2), other = await reserve('customer', 'forge', 1);
+  for (const patch of [{stock: 3}, {stock: 1}, {claim: 1}, {claim: 3}, {skipClaim: true}, {releaseId: other},
+    {order: {totalCents: 0}}, {order: {cancelledBy: 'vendor'}}, {order: {cancelledAt: 0}}, {order: {quantity: 1}}]) {
+    await assertFails(cancel('customer', id, 'forge', 2, 'customer', patch));
+  }
+  const db = client('customer');
+  await assertFails(updateDoc(doc(db, 'listings/forge'), {stock: increment(2), lastReleaseId: id}));
+  await assertFails(updateDoc(doc(db, 'listings/forge/claims/customer'), {quantity: increment(-2), lastReleaseId: id}));
+  await assertFails(updateDoc(doc(db, 'reservations', id), cancelled('customer')));
+  assert.equal(await stockOf('forge'), 17);
+  assert.equal(await heldBy('customer', 'forge'), 3);
+});
+test('an attacker cannot use another student order to move stock or allowance', async () => {
+  await seed('listings/victim', listing());
+  const id = await reserve('customer', 'victim', 2);
+  await assertSucceeds(reserve('other-customer', 'victim', 5));
+  const db = client('other-customer');
+  await assertFails(updateDoc(doc(db, 'listings/victim'), {stock: increment(2), lastReleaseId: id}));
+  await assertFails(updateDoc(doc(db, 'listings/victim/claims/other-customer'), {quantity: increment(-2), lastReleaseId: id}));
+  assert.equal(await heldBy('other-customer', 'victim'), 5);
+});
+test('students cancel only until the window ends; vendors can clear no-shows later', async () => {
+  const start = Date.now() + 10 * MINUTE;
+  await seed('listings/ended-order', listing({pickupStart: start}));
+  const id = await reserve('customer', 'ended-order', 2);
+  // Simulates the window passing without changing the order's other fields.
+  await env.withSecurityRulesDisabled(ctx => updateDoc(doc(ctx.firestore(), 'reservations', id), {pickupEnd: Date.now() - MINUTE}));
+  await assertFails(cancel('customer', id, 'ended-order', 2));
+  await assertSucceeds(cancel('vendor', id, 'ended-order', 2, 'customer'));
+  assert.equal(await stockOf('ended-order'), 20);
+});
+test('orders can be cancelled after pausing, and older orders without a claim still work', async () => {
+  await seed('listings/paused-order', listing());
+  const id = await reserve('customer', 'paused-order', 2);
+  await updateDoc(doc(client('vendor'), 'listings/paused-order'), {active: false});
+  await assertSucceeds(cancel('customer', id, 'paused-order', 2));
+  await seed('listings/legacy', listing());
+  const legacy = code();
+  await seed('reservations/' + legacy, {...orderFor('customer', 'legacy', listing(), legacy, 2), createdAt: new Date()});
+  await assertSucceeds(cancel('customer', legacy, 'legacy', 2, 'customer', {skipClaim: true}));
+  assert.equal(await stockOf('legacy'), 22);
 });

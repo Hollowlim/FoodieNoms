@@ -96,6 +96,28 @@ service cloud.firestore {
         d.quantity is int && d.quantity == claimBefore(listingId, uid) + order.quantity &&
         d.quantity <= maxPerCustomer();
     }
+    // Stock and claim changes are valid only as part of cancelling that same order.
+    function cancelledTogether(orderId, listingId) {
+      let before = get(/databases/$(database)/documents/reservations/$(orderId)).data;
+      let after = getAfter(/databases/$(database)/documents/reservations/$(orderId)).data;
+      return signedIn() && before.listingId == listingId && before.status == 'reserved' &&
+        after.status == 'cancelled' && after.cancelledBy == request.auth.uid;
+    }
+    function inventoryRelease(listingId) {
+      let d = request.resource.data;
+      let orderId = d.lastReleaseId;
+      return cancelledTogether(orderId, listingId) &&
+        d.diff(resource.data).affectedKeys().hasOnly(['stock','lastReleaseId']) &&
+        d.stock == resource.data.stock + get(/databases/$(database)/documents/reservations/$(orderId)).data.quantity;
+    }
+    function claimRelease(listingId, uid) {
+      let d = request.resource.data;
+      let orderId = d.lastReleaseId;
+      let order = get(/databases/$(database)/documents/reservations/$(orderId)).data;
+      return cancelledTogether(orderId, listingId) && order.customerId == uid &&
+        d.diff(resource.data).affectedKeys().hasOnly(['quantity','lastReleaseId']) &&
+        d.quantity == resource.data.quantity - order.quantity && d.quantity >= 0;
+    }
     function inventoryReservation(listingId) {
       let d = request.resource.data;
       let orderId = d.lastReservationId;
@@ -113,13 +135,13 @@ service cloud.firestore {
         resource.data.active == true || resource.data.vendorId == request.auth.uid || admin());
       allow list: if signedIn() && (resource.data.active == true || resource.data.vendorId == request.auth.uid || admin());
       allow create: if validListing();
-      allow update: if ownerToggle() || ownerEdit() || inventoryReservation(id);
+      allow update: if ownerToggle() || ownerEdit() || inventoryReservation(id) || inventoryRelease(id);
       allow delete: if false;
       match /claims/{uid} {
         allow get: if signedIn() && request.auth.uid == uid;
         allow create: if claimReservation(id, uid) && request.resource.data.keys().hasOnly(['quantity','lastReservationId']);
-        allow update: if claimReservation(id, uid) &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity','lastReservationId']);
+        allow update: if claimRelease(id, uid) || (claimReservation(id, uid) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity','lastReservationId']));
       }
     }
     function validReservation(id) {
@@ -153,12 +175,27 @@ service cloud.firestore {
         request.time.toMillis() <= resource.data.pickupEnd + pickupGraceMs() &&
         d.diff(resource.data).affectedKeys().hasOnly(['status','collectedAt']);
     }
+    // Students cancel until the window ends; vendors also clear no-shows afterwards.
+    function validCancellation(id) {
+      let d = request.resource.data;
+      let r = resource.data;
+      let listing = /databases/$(database)/documents/listings/$(r.listingId);
+      let claim = /databases/$(database)/documents/listings/$(r.listingId)/claims/$(r.customerId);
+      return signedIn() && r.status == 'reserved' && d.status == 'cancelled' &&
+        d.cancelledAt == request.time && d.cancelledBy == request.auth.uid &&
+        d.diff(r).affectedKeys().hasOnly(['status','cancelledAt','cancelledBy']) &&
+        ((r.customerId == request.auth.uid && request.time.toMillis() < r.pickupEnd) ||
+          (r.vendorId == request.auth.uid && approvedVendor(request.auth.uid))) &&
+        getAfter(listing).data.stock == get(listing).data.stock + r.quantity &&
+        getAfter(listing).data.lastReleaseId == id &&
+        (!exists(claim) || getAfter(claim).data.quantity == get(claim).data.quantity - r.quantity);
+    }
     match /reservations/{id} {
       allow get: if signedIn() && (!exists(/databases/$(database)/documents/reservations/$(id)) ||
         resource.data.customerId == request.auth.uid || resource.data.vendorId == request.auth.uid || admin());
       allow list: if signedIn() && (resource.data.customerId == request.auth.uid || resource.data.vendorId == request.auth.uid || admin());
       allow create: if validReservation(id);
-      allow update: if validCollection();
+      allow update: if validCollection() || validCancellation(id);
       allow delete: if false;
     }
     match /{document=**} { allow read, write: if false; }

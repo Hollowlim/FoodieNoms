@@ -180,6 +180,9 @@ class FoodieService {
       if (value == null || value['vendorId'] != uid) {
         throw StateError('No reservation for your store matches this code.');
       }
+      if (value['status'] == 'cancelled') {
+        throw StateError('This reservation was cancelled.');
+      }
       if (value['status'] != 'reserved') {
         throw StateError('This pickup was already collected.');
       }
