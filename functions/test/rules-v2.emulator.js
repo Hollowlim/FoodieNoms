@@ -52,3 +52,14 @@ test('ended listings cannot be edited unless the window is extended', async () =
   await assertFails(updateDoc(ref, {priceCents: 700}));
   await assertSucceeds(updateDoc(ref, {pickupEnd: Date.now() + HOUR}));
 });
+test('listings may name a preset photo and nothing else', async () => {
+  const ref = id => doc(client('vendor'), 'listings', id);
+  await assertSucceeds(setDoc(ref('no-photo'), listing()));
+  await assertSucceeds(setDoc(ref('photo'), listing({imageKey: 'photo-2'})));
+  await assertSucceeds(updateDoc(ref('photo'), {imageKey: 'photo-3'}));
+  await assertSucceeds(updateDoc(ref('no-photo'), {imageKey: 'photo-0'}));
+  for (const imageKey of ['photo-9', 'https://example.com/a.jpg', '', 3]) {
+    await assertFails(setDoc(ref('bad-photo'), listing({imageKey})));
+    await assertFails(updateDoc(ref('photo'), {imageKey}));
+  }
+});

@@ -45,6 +45,8 @@ service cloud.firestore {
       return boundedText(d.title,100) && boundedText(d.description,1000) &&
         boundedText(d.address,300) && boundedText(d.dietary,500) &&
         d.category in ['Bakery','Meals','Pastries','Other'] &&
+        // Preset photos: Cloud Storage uploads would need the Blaze plan.
+        (!('imageKey' in d) || d.imageKey in ['photo-0','photo-1','photo-2','photo-3']) &&
         d.priceCents is int && d.priceCents > 0 && d.priceCents <= 1000000 &&
         d.originalPriceCents is int && d.originalPriceCents >= d.priceCents && d.originalPriceCents <= 1000000 &&
         d.stock is int && d.stock <= 10000 &&
@@ -55,7 +57,7 @@ service cloud.firestore {
       let d = request.resource.data;
       return signedIn() && d.vendorId == request.auth.uid && approvedVendor(request.auth.uid) &&
         d.keys().hasAll(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','vendorId','vendorName','active','createdAt']) &&
-        d.keys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','vendorId','vendorName','active','createdAt']) &&
+        d.keys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','vendorId','vendorName','active','createdAt','imageKey']) &&
         validDetails(d) &&
         d.vendorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name &&
         d.stock > 0 && d.pickupStart > request.time.toMillis() &&
@@ -65,7 +67,7 @@ service cloud.firestore {
     function ownerEdit() {
       let d = request.resource.data;
       return signedIn() && resource.data.vendorId == request.auth.uid && approvedVendor(request.auth.uid) &&
-        d.diff(resource.data).affectedKeys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd']) &&
+        d.diff(resource.data).affectedKeys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','imageKey']) &&
         validDetails(d) && d.stock >= 0 && d.pickupEnd > request.time.toMillis();
     }
     function ownerToggle() {
