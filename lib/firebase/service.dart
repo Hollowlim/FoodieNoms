@@ -8,6 +8,28 @@ const pickupGraceMs = 15 * 60 * 1000;
 /// Mirrors maxPerCustomer() in firestore.rules.
 const maxPerCustomer = 5;
 
+/// Mirrors slotMs() in firestore.rules: pickup slots sit on the quarter hour.
+const pickupSlotMs = 15 * 60 * 1000;
+
+/// Simulated payment methods in Han's payment screen. No money moves.
+const simulatedPaymentMethods = ['ewallet', 'banking', 'card'];
+
+/// Items per order. Each item is a separate write, so keep orders small.
+const maxOrderItems = 3;
+
+/// The quarter-hour slot containing [time].
+int slotContaining(int time) => time - time % pickupSlotMs;
+
+/// The pickup window of an order: its slot, or the listing window for orders
+/// placed before slots existed.
+int orderSlotStart(Map<String, dynamic> order) =>
+    (order['slotStart'] ?? order['pickupStart']) as int;
+int orderSlotEnd(Map<String, dynamic> order) =>
+    (order['slotEnd'] ?? order['pickupEnd']) as int;
+
+bool isOpenOrder(Map<String, dynamic> order) =>
+    order['status'] == 'reserved' || order['status'] == 'ready';
+
 class FoodieService {
   final auth = FirebaseAuth.instance;
   final db = FirebaseFirestore.instance;
@@ -85,6 +107,11 @@ class FoodieService {
       'collectReservation' => _collect(data),
       'editListing' => _edit(data),
       'cancelReservation' => _cancel(data),
+      'reserveOrder' => _reserveOrder(data),
+      'collectPickupCode' => _collectPickupCode(data),
+      'markOrderReady' => _markOrder(data, 'ready'),
+      'markOrderNoShow' => _markOrder(data, 'noshow'),
+      'cancelOrder' => _cancelOrder(data),
       _ => throw UnsupportedError('Unknown action: $name'),
     };
   }
@@ -144,12 +171,11 @@ class FoodieService {
         throw StateError('Reservation not found for your account.');
       }
       if (order['status'] == 'cancelled') return;
-      if (order['status'] != 'reserved') {
+      if (!isOpenOrder(order)) {
         throw StateError('Collected orders cannot be cancelled.');
       }
       if (order['vendorId'] != uid &&
-          DateTime.now().millisecondsSinceEpoch >=
-              (order['pickupEnd'] as int)) {
+          DateTime.now().millisecondsSinceEpoch >= orderSlotEnd(order)) {
         throw StateError(
             'The cancellation window has ended. Contact the vendor.');
       }
@@ -185,31 +211,150 @@ class FoodieService {
     return {'ok': true};
   }
 
+  /// Single-item reservation, kept for the current screens.
   Future<Map<String, dynamic>> _reserve(Map<String, dynamic> data) async {
+    final result = await _reserveOrder({
+      'requestId': data['requestId'],
+      'items': [
+        {'listingId': data['listingId'], 'quantity': data['quantity']}
+      ],
+    });
+    final id = result['orderId'] as String;
+    return {...result, 'id': id, 'code': id};
+  }
+
+  /// Reserves up to [maxOrderItems] items from one shop for one pickup slot,
+  /// sharing a 4-digit pickup code. Without `slotStart`, the earliest slot
+  /// that is still open and overlaps every item's window is used.
+  Future<Map<String, dynamic>> _reserveOrder(Map<String, dynamic> data) async {
     final uid = _uid;
     final key = data['requestId'] as String;
     if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(key)) {
       throw StateError(
           'Invalid reservation request. Reopen this listing and try again.');
     }
-    final quantity = data['quantity'] as int;
-    final code = 'FN-${key.substring(0, 20).toUpperCase()}';
-    final order = db.collection('reservations').doc(code);
-    final listing = db.collection('listings').doc(data['listingId'] as String);
+    final items = (data['items'] as List)
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+    final paymentMethod = data['paymentMethod'] as String?;
+    if (paymentMethod != null &&
+        !simulatedPaymentMethods.contains(paymentMethod)) {
+      throw StateError('Choose a payment method.');
+    }
+    final listingIds = items.map((item) => item['listingId']).toSet();
+    if (items.isEmpty ||
+        items.length > maxOrderItems ||
+        listingIds.length != items.length) {
+      throw StateError(
+          'An order can have 1 to $maxOrderItems different items.');
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final deals = <Map<String, dynamic>>[];
+    for (final item in items) {
+      Map<String, dynamic>? deal;
+      try {
+        deal = (await db
+                .collection('listings')
+                .doc(item['listingId'] as String)
+                .get())
+            .data();
+      } on FirebaseException {
+        // Paused listings are hidden from students.
+        deal = null;
+      }
+      if (deal == null) {
+        throw StateError('This listing is no longer available.');
+      }
+      deals.add(deal);
+    }
+    if (deals.any((deal) => deal['vendorId'] != deals.first['vendorId'])) {
+      throw StateError('All items in one order must come from the same shop.');
+    }
+    var slotStart = data['slotStart'] as int?;
+    slotStart ??= deals
+        .map((deal) => slotContaining(now > (deal['pickupStart'] as int)
+            ? now
+            : deal['pickupStart'] as int))
+        .reduce((a, b) => a > b ? a : b);
+    final slotEnd = slotStart + pickupSlotMs;
+    if (slotStart % pickupSlotMs != 0) {
+      throw StateError('Choose one of the listed pickup times.');
+    }
+    if (slotEnd <= now) {
+      throw StateError('This pickup time has passed.');
+    }
+    if (deals.any((deal) =>
+        slotEnd <= (deal['pickupStart'] as int) ||
+        slotStart! >= (deal['pickupEnd'] as int))) {
+      throw StateError('Choose a pickup time when every item is available.');
+    }
+    // One id per item, stable across retries of the same request.
+    final ids = [
+      for (var i = 0; i < items.length; i++)
+        'FN-${key.substring(0, 18).toUpperCase()}${i.toRadixString(16).padLeft(2, '0').toUpperCase()}'
+    ];
+    final orderId = ids.first;
+    String? pickupCode;
+    final placed = <String>[];
+    // Each item is its own write: rules may read at most 20 documents per write.
+    for (var i = 0; i < items.length; i++) {
+      try {
+        pickupCode = await _reserveItem(
+            uid: uid,
+            id: ids[i],
+            orderId: orderId,
+            listingId: items[i]['listingId'] as String,
+            quantity: items[i]['quantity'] as int,
+            slotStart: slotStart,
+            pickupCode: pickupCode,
+            paymentMethod: paymentMethod);
+        placed.add(ids[i]);
+      } catch (_) {
+        // Never leave part of an order reserved.
+        for (final id in placed) {
+          try {
+            await _cancel({'reservationId': id});
+          } catch (_) {}
+        }
+        rethrow;
+      }
+    }
+    return {
+      'orderId': orderId,
+      'pickupCode': pickupCode,
+      'ids': ids,
+      'slotStart': slotStart,
+      'slotEnd': slotEnd,
+    };
+  }
+
+  /// Reserves one item and returns the order's pickup code. The first item,
+  /// with no [pickupCode] yet, also claims a free code for the shop.
+  Future<String> _reserveItem(
+      {required String uid,
+      required String id,
+      required String orderId,
+      required String listingId,
+      required int quantity,
+      required int slotStart,
+      String? pickupCode,
+      String? paymentMethod}) {
+    final order = db.collection('reservations').doc(id);
+    final listing = db.collection('listings').doc(listingId);
+    final slotEnd = slotStart + pickupSlotMs;
     return _transact((tx) async {
       final previous = await tx.get(order);
       if (previous.exists) {
         final old = previous.data()!;
         if (old['customerId'] != uid ||
-            old['listingId'] != listing.id ||
+            old['listingId'] != listingId ||
             old['quantity'] != quantity) {
           throw StateError(
               'This request is already linked to a different reservation.');
         }
-        return {'id': code, 'code': code};
+        return old['pickupCode'] as String;
       }
-      final snapshot = await tx.get(listing);
-      final deal = snapshot.data();
+      final deal = (await tx.get(listing)).data();
       if (deal == null ||
           deal['active'] != true ||
           (deal['pickupEnd'] as int) <= DateTime.now().millisecondsSinceEpoch) {
@@ -224,10 +369,32 @@ class FoodieService {
         throw StateError(
             'You can reserve at most $maxPerCustomer of this item.');
       }
+      final codes = db
+          .collection('vendors')
+          .doc(deal['vendorId'] as String)
+          .collection('pickupCodes');
+      var code = pickupCode;
+      if (code == null) {
+        final random = Random.secure();
+        final now = DateTime.now().millisecondsSinceEpoch;
+        for (var attempt = 0; attempt < 12 && code == null; attempt++) {
+          final candidate = random.nextInt(10000).toString().padLeft(4, '0');
+          final lock = (await tx.get(codes.doc(candidate))).data();
+          if (lock == null || (lock['until'] as int) < now) code = candidate;
+        }
+        if (code == null) {
+          throw StateError('This shop is very busy. Please try again.');
+        }
+        tx.set(codes.doc(code), {
+          'orderId': orderId,
+          'reservationId': id,
+          'until': slotEnd + pickupGraceMs,
+        });
+      }
       tx.set(order, {
         'customerId': uid,
         'vendorId': deal['vendorId'],
-        'listingId': listing.id,
+        'listingId': listingId,
         'title': deal['title'],
         'vendorName': deal['vendorName'],
         'address': deal['address'],
@@ -237,18 +404,129 @@ class FoodieService {
         'unitPriceCents': deal['priceCents'],
         'totalCents': (deal['priceCents'] as int) * quantity,
         'status': 'reserved',
-        'code': code,
-        'paymentStatus': 'unpaid',
+        'code': id,
+        'paymentStatus': paymentMethod == null ? 'unpaid' : 'test_paid',
+        if (paymentMethod != null) 'paymentMethod': paymentMethod,
         'createdAt': FieldValue.serverTimestamp(),
+        'orderId': orderId,
+        'slotStart': slotStart,
+        'slotEnd': slotEnd,
+        'pickupCode': code,
       });
       tx.update(listing, {
         'stock': (deal['stock'] as int) - quantity,
-        'lastReservationId': code
+        'lastReservationId': id
       });
-      tx.set(claim, {'quantity': held + quantity, 'lastReservationId': code},
+      tx.set(claim, {'quantity': held + quantity, 'lastReservationId': id},
           SetOptions(merge: true));
-      return {'id': code, 'code': code};
+      return code;
     });
+  }
+
+  /// The items of one order, as the customer or the vendor sees them.
+  Future<List<DocumentReference<Map<String, dynamic>>>> _orderItems(
+      String role, String uid, String orderId) async {
+    final items = await db
+        .collection('reservations')
+        .where(role == 'vendor' ? 'vendorId' : 'customerId', isEqualTo: uid)
+        .where('orderId', isEqualTo: orderId)
+        .get();
+    if (items.docs.isEmpty) {
+      throw StateError('This order was not found for your account.');
+    }
+    return items.docs.map((doc) => doc.reference).toList();
+  }
+
+  /// Vendor counter flow: the student reads out the 4-digit code.
+  Future<Map<String, dynamic>> _collectPickupCode(
+      Map<String, dynamic> data) async {
+    final uid = _uid;
+    final code = (data['pickupCode'] as String).trim();
+    if (!RegExp(r'^[0-9]{4}$').hasMatch(code)) {
+      throw StateError('Enter the 4-digit pickup code.');
+    }
+    final lock = (await db
+            .collection('vendors')
+            .doc(uid)
+            .collection('pickupCodes')
+            .doc(code)
+            .get())
+        .data();
+    if (lock == null) {
+      throw StateError('No order for your shop matches this code.');
+    }
+    if ((lock['until'] as int) < DateTime.now().millisecondsSinceEpoch) {
+      throw StateError('The pickup time for this code has ended.');
+    }
+    final orderId = lock['orderId'] as String;
+    final refs = await _orderItems('vendor', uid, orderId);
+    await _transact((tx) async {
+      final orders = [for (final ref in refs) (await tx.get(ref)).data()!];
+      final open = [
+        for (var i = 0; i < refs.length; i++)
+          if (isOpenOrder(orders[i])) i
+      ];
+      if (open.isEmpty) {
+        throw StateError(orders.any((o) => o['status'] == 'collected')
+            ? 'This pickup was already collected.'
+            : 'This order is no longer open.');
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now < orderSlotStart(orders[open.first]) - pickupGraceMs) {
+        throw StateError('This pickup window has not opened yet.');
+      }
+      for (final i in open) {
+        tx.update(refs[i], {
+          'status': 'collected',
+          'collectedAt': FieldValue.serverTimestamp()
+        });
+      }
+    });
+    return {'orderId': orderId, 'collected': true};
+  }
+
+  /// Vendor marks an order ready, or not collected once its slot is over.
+  Future<Map<String, dynamic>> _markOrder(
+      Map<String, dynamic> data, String status) async {
+    final uid = _uid;
+    final refs = await _orderItems('vendor', uid, data['orderId'] as String);
+    await _transact((tx) async {
+      final orders = [for (final ref in refs) (await tx.get(ref)).data()!];
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final from = status == 'ready' ? ['reserved'] : ['reserved', 'ready'];
+      final targets = [
+        for (var i = 0; i < refs.length; i++)
+          if (from.contains(orders[i]['status'])) i
+      ];
+      if (targets.isEmpty) throw StateError('This order is no longer open.');
+      final slotEnd = orderSlotEnd(orders[targets.first]);
+      if (status == 'noshow' && now <= slotEnd + pickupGraceMs) {
+        throw StateError(
+            'You can mark this as not collected after its pickup time ends.');
+      }
+      if (status == 'ready' && now > slotEnd + pickupGraceMs) {
+        throw StateError('This pickup time has ended.');
+      }
+      for (final i in targets) {
+        tx.update(refs[i], {
+          'status': status,
+          status == 'ready' ? 'readyAt' : 'noshowAt':
+              FieldValue.serverTimestamp()
+        });
+      }
+    });
+    return {'ok': true};
+  }
+
+  /// Cancels every open item of an order, returning stock and allowance.
+  Future<Map<String, dynamic>> _cancelOrder(Map<String, dynamic> data) async {
+    final uid = _uid;
+    final role = data['role'] as String? ?? 'customer';
+    final refs = await _orderItems(role, uid, data['orderId'] as String);
+    for (final ref in refs) {
+      await _cancel({'reservationId': ref.id});
+    }
+    return {'ok': true};
   }
 
   Future<Map<String, dynamic>> _collect(Map<String, dynamic> data) async {
@@ -267,14 +545,14 @@ class FoodieService {
       if (value['status'] == 'cancelled') {
         throw StateError('This reservation was cancelled.');
       }
-      if (value['status'] != 'reserved') {
+      if (!isOpenOrder(value)) {
         throw StateError('This pickup was already collected.');
       }
       final now = DateTime.now().millisecondsSinceEpoch;
-      if (now < (value['pickupStart'] as int) - pickupGraceMs) {
+      if (now < orderSlotStart(value) - pickupGraceMs) {
         throw StateError('This pickup window has not opened yet.');
       }
-      if (now > (value['pickupEnd'] as int) + pickupGraceMs) {
+      if (now > orderSlotEnd(value) + pickupGraceMs) {
         throw StateError('This pickup window has ended.');
       }
       tx.update(ref,
@@ -299,6 +577,15 @@ class FoodieService {
       db
           .collection('reservations')
           .where(role == 'vendor' ? 'vendorId' : 'customerId', isEqualTo: uid)
+          .snapshots();
+
+  /// Every item of one order, for the order and pickup screens.
+  Stream<QuerySnapshot<Map<String, dynamic>>> orderItems(
+          String role, String uid, String orderId) =>
+      db
+          .collection('reservations')
+          .where(role == 'vendor' ? 'vendorId' : 'customerId', isEqualTo: uid)
+          .where('orderId', isEqualTo: orderId)
           .snapshots();
 
   String requestId() {

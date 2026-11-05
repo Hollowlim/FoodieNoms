@@ -149,6 +149,81 @@ Future<void> customerCancelPaused() async {
   await reserve(listingId, 5);
 }
 
+Future<String> statusOf(String id) async =>
+    (await FirebaseFirestore.instance.doc('reservations/$id').get())
+        .data()!['status'] as String;
+
+Future<int> stockOf(String listingId) async =>
+    (await FirebaseFirestore.instance.doc('listings/$listingId').get())
+        .data()!['stock'] as int;
+
+Future<void> groupedOrderWithPickupCode() async {
+  await signIn('vendor@example.test');
+  final a = await publish(5, startsIn: 0);
+  final b = await publish(5, startsIn: 0);
+  await signIn('student@example.test');
+  final order = await service.call('reserveOrder', {
+    'requestId': service.requestId(),
+    'paymentMethod': 'ewallet',
+    'items': [
+      {'listingId': a, 'quantity': 2},
+      {'listingId': b, 'quantity': 1},
+    ],
+  });
+  final code = order['pickupCode'] as String;
+  final ids = (order['ids'] as List).cast<String>();
+  if (!RegExp(r'^[0-9]{4}$').hasMatch(code)) throw 'Bad pickup code $code';
+  expectEqual(await stockOf(a), 3);
+  expectEqual(await stockOf(b), 4);
+  final first =
+      (await FirebaseFirestore.instance.doc('reservations/${ids[0]}').get())
+          .data()!;
+  expectEqual(first['paymentStatus'], 'test_paid');
+  expectEqual(first['paymentMethod'], 'ewallet');
+
+  await signIn('vendor@example.test');
+  await expectStateError(
+      service.call('markOrderNoShow', {'orderId': order['orderId']}),
+      'after its pickup time ends');
+  await service.call('markOrderReady', {'orderId': order['orderId']});
+  expectEqual(await statusOf(ids[0]), 'ready');
+  expectEqual(await statusOf(ids[1]), 'ready');
+  final wrong = ((int.parse(code) + 1) % 10000).toString().padLeft(4, '0');
+  await expectStateError(
+      service.call('collectPickupCode', {'pickupCode': wrong}),
+      'No order for your shop');
+  await service.call('collectPickupCode', {'pickupCode': code});
+  expectEqual(await statusOf(ids[0]), 'collected');
+  expectEqual(await statusOf(ids[1]), 'collected');
+  await expectStateError(
+      service.call('collectPickupCode', {'pickupCode': code}),
+      'already collected');
+}
+
+Future<void> failedItemUndoesOrder() async {
+  await signIn('vendor@example.test');
+  final a = await publish(5, startsIn: 0);
+  final b = await publish(1, startsIn: 0);
+  await signIn('student@example.test');
+  await expectStateError(
+      service.call('reserveOrder', {
+        'requestId': service.requestId(),
+        'items': [
+          {'listingId': a, 'quantity': 2},
+          {'listingId': b, 'quantity': 2},
+        ],
+      }),
+      'Not enough stock');
+  expectEqual(await stockOf(a), 5);
+  // The allowance came back with the stock, so the full limit is available.
+  await service.call('reserveOrder', {
+    'requestId': service.requestId(),
+    'items': [
+      {'listingId': a, 'quantity': maxPerCustomer},
+    ],
+  });
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: emulatorOnly);
@@ -165,6 +240,11 @@ Future<void> main() async {
       'customer cancellation on paused food restores allowance',
       customerCancelPaused
     ),
+    (
+      'grouped order, ready and 4-digit pickup code',
+      groupedOrderWithPickupCode
+    ),
+    ('a failed item undoes the whole order', failedItemUndoesOrder),
   ]) {
     try {
       await check();
