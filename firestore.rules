@@ -140,7 +140,8 @@ service cloud.firestore {
       allow update: if ownerToggle() || ownerEdit() || inventoryReservation(id) || inventoryRelease(id);
       allow delete: if false;
       match /claims/{uid} {
-        allow get: if signedIn() && request.auth.uid == uid;
+        allow get: if signedIn() && (request.auth.uid == uid ||
+          (get(/databases/$(database)/documents/listings/$(id)).data.vendorId == request.auth.uid && approvedVendor(request.auth.uid)));
         allow create: if claimReservation(id, uid) && request.resource.data.keys().hasOnly(['quantity','lastReservationId']);
         allow update: if claimRelease(id, uid) || (claimReservation(id, uid) &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity','lastReservationId']));
@@ -203,3 +204,4 @@ service cloud.firestore {
     match /{document=**} { allow read, write: if false; }
   }
 }
+

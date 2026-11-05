@@ -97,6 +97,58 @@ Future<void> tooEarly() async {
       service.call('collectReservation', {'code': code}), 'not opened yet');
 }
 
+Future<void> editAndCancel() async {
+  await signIn('vendor@example.test');
+  final listingId = await publish(20);
+  await signIn('student@example.test');
+  final code = await reserve(listingId, 2);
+  await signIn('vendor@example.test');
+  await service.call('editListing',
+      {'listingId': listingId, 'title': 'Updated lunch', 'priceCents': 700});
+  final db = FirebaseFirestore.instance;
+  expectEqual((await db.doc('listings/$listingId').get()).data()!['title'],
+      'Updated lunch');
+  expectEqual(
+      (await db.doc('reservations/$code').get()).data()!['unitPriceCents'],
+      800);
+  // Vendor must be able to read and release the student's claim.
+  await service
+      .call('setListingActive', {'listingId': listingId, 'active': false});
+  await service.call('cancelReservation', {'reservationId': code});
+  expectEqual((await db.doc('listings/$listingId').get()).data()!['stock'], 20);
+  await service.call('cancelReservation', {'reservationId': code});
+  expectEqual((await db.doc('listings/$listingId').get()).data()!['stock'], 20);
+  await expectStateError(
+      service.call('collectReservation', {'code': code}), 'cancelled');
+  await signIn('student@example.test');
+  final uid = FirebaseAuth.instance.currentUser!.uid;
+  expectEqual(
+      (await db.doc('listings/$listingId/claims/$uid').get())
+          .data()!['quantity'],
+      0);
+}
+
+Future<void> customerCancelPaused() async {
+  await signIn('vendor@example.test');
+  final listingId = await publish(20);
+  await signIn('student@example.test');
+  final code = await reserve(listingId, 5);
+  await signIn('vendor@example.test');
+  await service
+      .call('setListingActive', {'listingId': listingId, 'active': false});
+  await signIn('student@example.test');
+  await service.call('cancelReservation', {'reservationId': code});
+  await signIn('vendor@example.test');
+  expectEqual(
+      (await FirebaseFirestore.instance.doc('listings/$listingId').get())
+          .data()!['stock'],
+      20);
+  await service
+      .call('setListingActive', {'listingId': listingId, 'active': true});
+  await signIn('student@example.test');
+  await reserve(listingId, 5);
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: emulatorOnly);
@@ -108,6 +160,11 @@ Future<void> main() async {
     ('publish, reserve and collect', journey),
     ('per-student limit across orders', limit),
     ('collecting too early', tooEarly),
+    ('edit snapshot and vendor cancellation', editAndCancel),
+    (
+      'customer cancellation on paused food restores allowance',
+      customerCancelPaused
+    ),
   ]) {
     try {
       await check();

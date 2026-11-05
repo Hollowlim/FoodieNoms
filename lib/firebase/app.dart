@@ -292,8 +292,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         decoration: InputDecoration(
                             labelText:
                                 register ? 'Email' : 'Email or username'),
-                        validator: (v) => !register &&
-                                _adminDemoUsername.isNotEmpty &&
+                        validator: (v) => !register && _adminDemoUsername.isNotEmpty &&
                                 _adminDemoPassword.isNotEmpty &&
                                 v?.trim() == _adminDemoUsername
                             ? null
@@ -834,6 +833,24 @@ class _CloudListingsState extends State<CloudListings> {
                                           Text('${d['stock']} left')
                                         ]),
                                         if (vendor)
+                                          TextButton.icon(
+                                              onPressed: !widget.approved
+                                                  ? null
+                                                  : () => Navigator.push(
+                                                      context,
+                                                      MaterialPageRoute(
+                                                          builder: (_) =>
+                                                              PublishScreen(
+                                                                  service: widget
+                                                                      .service,
+                                                                  listingId:
+                                                                      doc.id,
+                                                                  initial: d))),
+                                              icon: const Icon(
+                                                  Icons.edit_outlined),
+                                              label:
+                                                  const Text('Edit listing')),
+                                        if (vendor)
                                           TextButton(
                                               onPressed: pending
                                                       .contains(doc.id)
@@ -992,14 +1009,14 @@ class _ReservationScreenState extends State<ReservationScreen> {
                 IconButton(
                     onPressed: busy ||
                             quantity >= (d['stock'] as int) ||
-                            quantity >= 100
+                            quantity >= maxPerCustomer
                         ? null
                         : () => setState(() => quantity++),
                     icon: const Icon(Icons.add_circle_outline))
               ]),
               const SizedBox(height: 12),
               const Text(
-                  'This reserves food for collection. Online payments and cancellation are not available. Please reserve only if you can collect.'),
+                  'Reserve up to 5 items per listing across your orders. You can cancel before the pickup window ends. Pay at pickup.'),
               if (error != null)
                 Padding(
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -1062,6 +1079,37 @@ class _CloudPickupsState extends State<CloudPickups> {
     }
   }
 
+  Future<void> cancel(String reservationId) async {
+    final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+              title: const Text('Cancel reservation?'),
+              content: const Text(
+                  'The reserved quantity will be returned to the listing. This cannot undo a completed pickup.'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Keep reservation')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Cancel reservation'))
+              ],
+            ));
+    if (confirmed != true || !mounted) return;
+    setState(() => busy = true);
+    try {
+      await widget.service
+          .call('cancelReservation', {'reservationId': reservationId});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(firebaseMessage(e))));
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Column(children: [
         if (widget.role == 'vendor')
@@ -1113,6 +1161,21 @@ class _CloudPickupsState extends State<CloudPickups> {
                                       const SizedBox(height: 12),
                                       Text(
                                           'Qty ${d['quantity']} · ${money(d['totalCents'])} · Unpaid'),
+                                      if (d['status'] == 'reserved' &&
+                                          ((widget.role == 'vendor' &&
+                                                  widget.approved) ||
+                                              (widget.role == 'customer' &&
+                                                  DateTime.now()
+                                                          .millisecondsSinceEpoch <
+                                                      (d['pickupEnd'] as int))))
+                                        TextButton.icon(
+                                            onPressed: busy
+                                                ? null
+                                                : () => cancel(doc.id),
+                                            icon: const Icon(
+                                                Icons.cancel_outlined),
+                                            label: const Text(
+                                                'Cancel reservation')),
                                       if (widget.role == 'customer') ...[
                                         const Divider(height: 24),
                                         SelectableText(d['code'] as String,
@@ -1193,8 +1256,11 @@ class _VendorApprovalsState extends State<VendorApprovals> {
 }
 
 class PublishScreen extends StatefulWidget {
-  const PublishScreen({super.key, required this.service});
+  const PublishScreen(
+      {super.key, required this.service, this.listingId, this.initial});
   final FoodieService service;
+  final String? listingId;
+  final Map<String, dynamic>? initial;
   @override
   State<PublishScreen> createState() => _PublishScreenState();
 }
@@ -1228,6 +1294,23 @@ class _PublishScreenState extends State<PublishScreen> {
     super.dispose();
   }
 
+  @override
+  void initState() {
+    super.initState();
+    final d = widget.initial;
+    if (d == null) return;
+    title.text = d['title'] as String;
+    description.text = d['description'] as String;
+    address.text = d['address'] as String;
+    dietary.text = d['dietary'] as String;
+    price.text = ((d['priceCents'] as int) / 100).toStringAsFixed(2);
+    original.text = ((d['originalPriceCents'] as int) / 100).toStringAsFixed(2);
+    stock.text = '${d['stock']}';
+    category = d['category'] as String;
+    start = DateTime.fromMillisecondsSinceEpoch(d['pickupStart'] as int);
+    end = DateTime.fromMillisecondsSinceEpoch(d['pickupEnd'] as int);
+  }
+
   int? cents(String text) {
     if (!RegExp(r'^\d+(\.\d{1,2})?$').hasMatch(text.trim())) return null;
     final value = double.tryParse(text.trim());
@@ -1239,7 +1322,9 @@ class _PublishScreenState extends State<PublishScreen> {
     final now = DateTime.now();
     final day = await showDatePicker(
         context: context,
-        initialDate: first ? start ?? now : end ?? start ?? now,
+        initialDate: (first ? start ?? now : end ?? start ?? now).isBefore(now)
+            ? now
+            : (first ? start ?? now : end ?? start ?? now),
         firstDate: DateTime(now.year, now.month, now.day),
         lastDate: now.add(const Duration(days: 30)));
     if (day == null || !mounted) return;
@@ -1262,15 +1347,15 @@ class _PublishScreenState extends State<PublishScreen> {
 
   Future<void> publish() async {
     if (!form.currentState!.validate()) return;
-    // Mirrors the five-minute allowance in firestore.rules.
     final now = DateTime.now();
     if (start == null ||
         end == null ||
-        start!.isBefore(now.subtract(const Duration(minutes: 5))) ||
+        (widget.listingId == null &&
+            start!.isBefore(now.subtract(const Duration(minutes: 5)))) ||
         !end!.isAfter(start!) ||
         !end!.isAfter(now)) {
       setState(() => error =
-          'Choose a pickup start from now onwards and a later end time.');
+          'Choose an open or upcoming pickup window with a later end time.');
       return;
     }
     setState(() {
@@ -1278,7 +1363,9 @@ class _PublishScreenState extends State<PublishScreen> {
       error = null;
     });
     try {
-      await widget.service.call('publishListing', {
+      await widget.service
+          .call(widget.listingId == null ? 'publishListing' : 'editListing', {
+        if (widget.listingId != null) 'listingId': widget.listingId,
         'title': title.text.trim(),
         'description': description.text.trim(),
         'address': address.text.trim(),
@@ -1286,7 +1373,9 @@ class _PublishScreenState extends State<PublishScreen> {
         'category': category,
         'priceCents': cents(price.text),
         'originalPriceCents': cents(original.text),
-        'stock': int.parse(stock.text),
+        if (widget.initial == null ||
+            int.parse(stock.text) != widget.initial!['stock'])
+          'stock': int.parse(stock.text),
         'pickupStart': start!.millisecondsSinceEpoch,
         'pickupEnd': end!.millisecondsSinceEpoch
       });
@@ -1334,7 +1423,10 @@ class _PublishScreenState extends State<PublishScreen> {
               child: Form(
                   key: form,
                   child: ListView(padding: const EdgeInsets.all(20), children: [
-                    const Text('Create surplus listing',
+                    Text(
+                        widget.listingId == null
+                            ? 'Create surplus listing'
+                            : 'Edit food listing',
                         style: TextStyle(
                             fontSize: 25,
                             fontWeight: FontWeight.w800,
@@ -1389,8 +1481,10 @@ class _PublishScreenState extends State<PublishScreen> {
                             labelText: 'Available quantity'),
                         validator: (v) {
                           final value = int.tryParse(v ?? '');
-                          return value == null || value < 1 || value > 10000
-                              ? 'Enter a quantity from 1 to 10,000.'
+                          return value == null ||
+                                  value < (widget.listingId == null ? 1 : 0) ||
+                                  value > 10000
+                              ? 'Enter a quantity from ${widget.listingId == null ? 1 : 0} to 10,000.'
                               : null;
                         }),
                     const SizedBox(height: 16),
@@ -1413,7 +1507,11 @@ class _PublishScreenState extends State<PublishScreen> {
                     const SizedBox(height: 16),
                     FilledButton(
                         onPressed: busy ? null : publish,
-                        child: Text(busy ? 'Publishing…' : 'Publish listing')),
+                        child: Text(busy
+                            ? 'Saving…'
+                            : widget.listingId == null
+                                ? 'Publish listing'
+                                : 'Save changes')),
                   ])))));
 }
 

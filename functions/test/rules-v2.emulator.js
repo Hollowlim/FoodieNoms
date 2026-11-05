@@ -233,3 +233,15 @@ test('a listing may open for pickup immediately, but not in the past', async () 
   const id = await reserve('customer', 'open-now', 1);
   await assertSucceeds(updateDoc(doc(client('vendor'), 'reservations', id), collected));
 });
+
+
+test('only the student and approved listing owner can read a claim for cancellation', async () => {
+  await seed('listings/read-claim', listing());
+  await reserve('customer', 'read-claim', 2);
+  for (const uid of ['customer', 'vendor']) {
+    await assertSucceeds(getDoc(doc(client(uid), 'listings/read-claim/claims/customer')));
+  }
+  for (const uid of ['other-customer', 'other-vendor', 'pending']) {
+    await assertFails(getDoc(doc(client(uid), 'listings/read-claim/claims/customer')));
+  }
+});

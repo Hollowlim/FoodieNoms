@@ -83,6 +83,8 @@ class FoodieService {
       'setListingActive' => _setActive(data),
       'reserveListing' => _reserve(data),
       'collectReservation' => _collect(data),
+      'editListing' => _edit(data),
+      'cancelReservation' => _cancel(data),
       _ => throw UnsupportedError('Unknown action: $name'),
     };
   }
@@ -112,6 +114,67 @@ class FoodieService {
       });
     });
     return {'id': ref.id};
+  }
+
+  Future<Map<String, dynamic>> _edit(Map<String, dynamic> data) async {
+    final uid = _uid;
+    final ref = db.collection('listings').doc(data['listingId'] as String);
+    final details = Map<String, dynamic>.from(data)..remove('listingId');
+    await _transact((tx) async {
+      final listing = (await tx.get(ref)).data();
+      final profile = (await tx.get(db.collection('users').doc(uid))).data();
+      if (listing?['vendorId'] != uid ||
+          profile?['role'] != 'vendor' ||
+          profile?['approved'] != true) {
+        throw StateError('Only the approved listing owner can edit this food.');
+      }
+      tx.update(ref, details);
+    });
+    return {'id': ref.id};
+  }
+
+  Future<Map<String, dynamic>> _cancel(Map<String, dynamic> data) async {
+    final uid = _uid;
+    final ref =
+        db.collection('reservations').doc(data['reservationId'] as String);
+    await _transact((tx) async {
+      final order = (await tx.get(ref)).data();
+      if (order == null ||
+          (order['customerId'] != uid && order['vendorId'] != uid)) {
+        throw StateError('Reservation not found for your account.');
+      }
+      if (order['status'] == 'cancelled') return;
+      if (order['status'] != 'reserved') {
+        throw StateError('Collected orders cannot be cancelled.');
+      }
+      if (order['vendorId'] != uid &&
+          DateTime.now().millisecondsSinceEpoch >=
+              (order['pickupEnd'] as int)) {
+        throw StateError(
+            'The cancellation window has ended. Contact the vendor.');
+      }
+      final listing =
+          db.collection('listings').doc(order['listingId'] as String);
+      final claim =
+          listing.collection('claims').doc(order['customerId'] as String);
+      final held = await tx.get(claim);
+      final quantity = order['quantity'] as int;
+      tx.update(ref, {
+        'status': 'cancelled',
+        'cancelledBy': uid,
+        'cancelledAt': FieldValue.serverTimestamp()
+      });
+      // No listing read: customers can cancel even after the vendor pauses it.
+      tx.update(listing,
+          {'stock': FieldValue.increment(quantity), 'lastReleaseId': ref.id});
+      if (held.exists) {
+        tx.update(claim, {
+          'quantity': FieldValue.increment(-quantity),
+          'lastReleaseId': ref.id
+        });
+      }
+    });
+    return {'ok': true};
   }
 
   Future<Map<String, dynamic>> _setActive(Map<String, dynamic> data) async {
