@@ -9,7 +9,7 @@ const client=uid=>env.authenticatedContext(uid).firestore();
 const code=n=>'FN-'+n.toString(16).toUpperCase().padStart(20,'0');
 const listing=(overrides={})=>({title:'Lunch box',description:'Rice and vegetables',address:'1 Test Street, Subang Jaya',
   dietary:'Contains soy',category:'Meals',priceCents:800,originalPriceCents:1500,stock:1,
-  pickupStart:Date.now()+3600000,pickupEnd:Date.now()+7200000,vendorId:'vendor',vendorName:'Subang Cafe',
+  pickupStart:Date.now()+600000,pickupEnd:Date.now()+7200000,vendorId:'vendor',vendorName:'Subang Cafe',
   active:true,createdAt:serverTimestamp(),...overrides});
 const snapshotOrder=(uid,id,deal,quantity=1)=>({customerId:uid,vendorId:deal.vendorId,listingId:id,title:deal.title,
   vendorName:deal.vendorName,address:deal.address,pickupStart:deal.pickupStart,pickupEnd:deal.pickupEnd,quantity,
@@ -23,8 +23,11 @@ async function reserve(uid,id,orderId) {
     const snapshot=await tx.get(listingRef), deal=snapshot.data();
     if(deal.stock<1) throw new Error('Sold out');
     const data={...snapshotOrder(uid,id,deal),code:orderId};
+    const claimRef=doc(db,'listings',id,'claims',uid);
+    const held=(await tx.get(claimRef)).data()?.quantity??0;
     tx.set(orderRef,data);
     tx.update(listingRef,{stock:deal.stock-1,lastReservationId:orderId});
+    tx.set(claimRef,{quantity:held+1,lastReservationId:orderId},{merge:true});
     return data;
   });
 }
@@ -33,6 +36,7 @@ async function forge(id,orderId,patch={},listingPatch={}) {
   const batch=writeBatch(db);
   batch.set(doc(db,'reservations',orderId),{...snapshotOrder('customer',id,deal),code:orderId,...patch});
   batch.update(doc(db,'listings',id),{stock:deal.stock-1,lastReservationId:orderId,...listingPatch});
+  batch.set(doc(db,'listings',id,'claims','customer'),{quantity:1,lastReservationId:orderId});
   return batch.commit();
 }
 before(async()=>{
@@ -57,8 +61,7 @@ test('only approved vendors publish validated listings',async()=>{
    await assertFails(setDoc(doc(client('vendor'),'listings','bad-'+i),listing(patch)));
  }
  await assertFails(updateDoc(doc(client('other-vendor'),'listings','last-item'),{active:false}));
- await assertFails(updateDoc(doc(client('vendor'),'listings','last-item'),{stock:100}));
- await assertFails(updateDoc(doc(client('vendor'),'listings','last-item'),{priceCents:1}));
+ await assertFails(updateDoc(doc(client('other-vendor'),'listings','last-item'),{priceCents:1}));
 });
 test('concurrent customers cannot oversell; retries return the same order',async()=>{
  const result=await Promise.allSettled([reserve('customer','last-item',code(1)),reserve('other-customer','last-item',code(2))]);

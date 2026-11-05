@@ -2,6 +2,12 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+/// Mirrors pickupGraceMs() in firestore.rules.
+const pickupGraceMs = 15 * 60 * 1000;
+
+/// Mirrors maxPerCustomer() in firestore.rules.
+const maxPerCustomer = 5;
+
 class FoodieService {
   final auth = FirebaseAuth.instance;
   final db = FirebaseFirestore.instance;
@@ -27,12 +33,32 @@ class FoodieService {
     });
   }
 
+  /// Web transactions rethrow errors as an untyped JS object, which would hide
+  /// the message from [firebaseMessage], so the original error is kept here.
+  Future<T> _transact<T>(Future<T> Function(Transaction tx) handler) async {
+    StateError? failure;
+    try {
+      return await db.runTransaction((tx) async {
+        failure = null;
+        try {
+          return await handler(tx);
+        } on StateError catch (error) {
+          failure = error;
+          rethrow;
+        }
+      });
+    } catch (_) {
+      if (failure != null) throw failure!;
+      rethrow;
+    }
+  }
+
   Future<void> approveVendor(String vendorId) async {
     final user = auth.currentUser;
     if (user == null) throw StateError('Please sign in first.');
     final actor = db.collection('users').doc(user.uid);
     final target = db.collection('users').doc(vendorId);
-    await db.runTransaction((transaction) async {
+    await _transact((transaction) async {
       final profile = await transaction.get(actor);
       final vendor = await transaction.get(target);
       if (profile.data()?['role'] != 'admin') {
@@ -70,7 +96,7 @@ class FoodieService {
   Future<Map<String, dynamic>> _publish(Map<String, dynamic> data) async {
     final uid = _uid;
     final ref = db.collection('listings').doc();
-    await db.runTransaction((tx) async {
+    await _transact((tx) async {
       final profile = await tx.get(db.collection('users').doc(uid));
       final vendor = profile.data();
       if (vendor?['role'] != 'vendor' || vendor?['approved'] != true) {
@@ -107,7 +133,7 @@ class FoodieService {
     final code = 'FN-${key.substring(0, 20).toUpperCase()}';
     final order = db.collection('reservations').doc(code);
     final listing = db.collection('listings').doc(data['listingId'] as String);
-    return db.runTransaction((tx) async {
+    return _transact((tx) async {
       final previous = await tx.get(order);
       if (previous.exists) {
         final old = previous.data()!;
@@ -126,8 +152,14 @@ class FoodieService {
           (deal['pickupEnd'] as int) <= DateTime.now().millisecondsSinceEpoch) {
         throw StateError('This listing is no longer available.');
       }
-      if (quantity < 1 || quantity > 100 || (deal['stock'] as int) < quantity) {
+      if (quantity < 1 || (deal['stock'] as int) < quantity) {
         throw StateError('Not enough stock remains for this quantity.');
+      }
+      final claim = listing.collection('claims').doc(uid);
+      final held = ((await tx.get(claim)).data()?['quantity'] as int?) ?? 0;
+      if (held + quantity > maxPerCustomer) {
+        throw StateError(
+            'You can reserve at most $maxPerCustomer of this item.');
       }
       tx.set(order, {
         'customerId': uid,
@@ -150,6 +182,8 @@ class FoodieService {
         'stock': (deal['stock'] as int) - quantity,
         'lastReservationId': code
       });
+      tx.set(claim, {'quantity': held + quantity, 'lastReservationId': code},
+          SetOptions(merge: true));
       return {'id': code, 'code': code};
     });
   }
@@ -161,14 +195,24 @@ class FoodieService {
       throw StateError('Enter the complete pickup code shown in My Pickups.');
     }
     final ref = db.collection('reservations').doc(code);
-    await db.runTransaction((tx) async {
+    await _transact((tx) async {
       final order = await tx.get(ref);
       final value = order.data();
       if (value == null || value['vendorId'] != uid) {
         throw StateError('No reservation for your store matches this code.');
       }
+      if (value['status'] == 'cancelled') {
+        throw StateError('This reservation was cancelled.');
+      }
       if (value['status'] != 'reserved') {
         throw StateError('This pickup was already collected.');
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now < (value['pickupStart'] as int) - pickupGraceMs) {
+        throw StateError('This pickup window has not opened yet.');
+      }
+      if (now > (value['pickupEnd'] as int) + pickupGraceMs) {
+        throw StateError('This pickup window has ended.');
       }
       tx.update(ref,
           {'status': 'collected', 'collectedAt': FieldValue.serverTimestamp()});
