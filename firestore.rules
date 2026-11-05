@@ -44,7 +44,8 @@ service cloud.firestore {
     function validDetails(d) {
       return boundedText(d.title,100) && boundedText(d.description,1000) &&
         boundedText(d.address,300) && boundedText(d.dietary,500) &&
-        d.category in ['Bakery','Meals','Pastries','Other'] &&
+        // Han's categories, plus the earlier ones so existing listings stay editable.
+        d.category in ['Bakery','Café','Dessert','Meals','Drinks','Others','Pastries','Other'] &&
         // Preset photos: Cloud Storage uploads would need the Blaze plan.
         (!('imageKey' in d) || d.imageKey in ['photo-0','photo-1','photo-2','photo-3']) &&
         d.priceCents is int && d.priceCents > 0 && d.priceCents <= 1000000 &&
@@ -102,7 +103,7 @@ service cloud.firestore {
     function cancelledTogether(orderId, listingId) {
       let before = get(/databases/$(database)/documents/reservations/$(orderId)).data;
       let after = getAfter(/databases/$(database)/documents/reservations/$(orderId)).data;
-      return signedIn() && before.listingId == listingId && before.status == 'reserved' &&
+      return signedIn() && before.listingId == listingId && before.status in ['reserved','ready'] &&
         after.status == 'cancelled' && after.cancelledBy == request.auth.uid;
     }
     function inventoryRelease(listingId) {
@@ -147,13 +148,45 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity','lastReservationId']));
       }
     }
+    // Han's UI: a 15-minute pickup slot, items grouped into one order, and a
+    // 4-digit counter code. These fields come as a set; orders without them
+    // keep the listing's whole window and are collected by their long code.
+    function slotMs() { return 900000; }
+    function slotStartOf(r) { return 'slotStart' in r ? r.slotStart : r.pickupStart; }
+    function slotEndOf(r) { return 'slotEnd' in r ? r.slotEnd : r.pickupEnd; }
+    function codeLock(vendorId, code) {
+      return /databases/$(database)/documents/vendors/$(vendorId)/pickupCodes/$(code);
+    }
+    function validOrderFields(d, listing) {
+      let lock = getAfter(codeLock(d.vendorId, d.pickupCode)).data;
+      return d.orderId is string && d.orderId.matches('FN-[A-F0-9]{20}') &&
+        d.pickupCode is string && d.pickupCode.matches('[0-9]{4}') &&
+        d.slotStart is int && d.slotEnd is int &&
+        // Slots sit on the quarter hour, so items from different listings can share one.
+        d.slotStart % slotMs() == 0 && d.slotEnd == d.slotStart + slotMs() &&
+        d.slotEnd > listing.pickupStart && d.slotStart < listing.pickupEnd &&
+        d.slotEnd > request.time.toMillis() &&
+        // Every item in the order shares the code and the slot.
+        lock.orderId == d.orderId && lock.until == d.slotEnd + pickupGraceMs();
+    }
+    // Payment is simulated, as agreed with TBS: the method is recorded, and no
+    // money moves. Only the sandbox's successful outcome creates an order.
+    function validPayment(d) {
+      return (d.paymentStatus == 'unpaid' && !('paymentMethod' in d)) ||
+        (d.paymentStatus == 'test_paid' && d.paymentMethod in ['ewallet','banking','card']);
+    }
+    function orderFieldsAllOrNone(d) {
+      return d.keys().hasAll(['orderId','slotStart','slotEnd','pickupCode']) ||
+        !d.keys().hasAny(['orderId','slotStart','slotEnd','pickupCode']);
+    }
     function validReservation(id) {
       let d = request.resource.data;
       let listing = get(/databases/$(database)/documents/listings/$(d.listingId)).data;
       let nextListing = getAfter(/databases/$(database)/documents/listings/$(d.listingId)).data;
       return hasRole('customer') && id.matches('FN-[A-F0-9]{20}') && d.code == id &&
         d.keys().hasAll(['customerId','vendorId','listingId','title','vendorName','address','pickupStart','pickupEnd','quantity','unitPriceCents','totalCents','status','code','paymentStatus','createdAt']) &&
-        d.keys().hasOnly(['customerId','vendorId','listingId','title','vendorName','address','pickupStart','pickupEnd','quantity','unitPriceCents','totalCents','status','code','paymentStatus','createdAt']) &&
+        d.keys().hasOnly(['customerId','vendorId','listingId','title','vendorName','address','pickupStart','pickupEnd','quantity','unitPriceCents','totalCents','status','code','paymentStatus','createdAt','orderId','slotStart','slotEnd','pickupCode','paymentMethod']) &&
+        orderFieldsAllOrNone(d) && (!('orderId' in d) || validOrderFields(d, listing)) &&
         d.customerId == request.auth.uid && d.vendorId == listing.vendorId && approvedVendor(listing.vendorId) &&
         d.title == listing.title && d.vendorName == listing.vendorName && d.address == listing.address &&
         d.pickupStart is int && d.pickupEnd is int &&
@@ -162,7 +195,7 @@ service cloud.firestore {
         claimAfter(d.listingId, d.customerId) == claimBefore(d.listingId, d.customerId) + d.quantity &&
         d.unitPriceCents is int && d.totalCents is int &&
         d.unitPriceCents == listing.priceCents && d.totalCents == listing.priceCents * d.quantity &&
-        d.status == 'reserved' && d.paymentStatus == 'unpaid' && d.createdAt == request.time &&
+        d.status == 'reserved' && validPayment(d) && d.createdAt == request.time &&
         listing.active == true && listing.pickupEnd > request.time.toMillis() &&
         nextListing.stock == listing.stock - d.quantity && nextListing.stock >= 0 &&
         nextListing.lastReservationId == id &&
@@ -170,13 +203,34 @@ service cloud.firestore {
     }
     // Grace period either side of the window; 15 minutes until agreed with TBS.
     function pickupGraceMs() { return 900000; }
+    function openOrder(r) { return r.status in ['reserved','ready']; }
+    function owningVendor(r) {
+      return signedIn() && approvedVendor(request.auth.uid) && r.vendorId == request.auth.uid;
+    }
     function validCollection() {
       let d = request.resource.data;
-      return signedIn() && approvedVendor(request.auth.uid) && resource.data.vendorId == request.auth.uid &&
-        resource.data.status == 'reserved' && d.status == 'collected' && d.collectedAt == request.time &&
-        request.time.toMillis() >= resource.data.pickupStart - pickupGraceMs() &&
-        request.time.toMillis() <= resource.data.pickupEnd + pickupGraceMs() &&
-        d.diff(resource.data).affectedKeys().hasOnly(['status','collectedAt']);
+      let r = resource.data;
+      return owningVendor(r) && openOrder(r) && d.status == 'collected' && d.collectedAt == request.time &&
+        request.time.toMillis() >= slotStartOf(r) - pickupGraceMs() &&
+        request.time.toMillis() <= slotEndOf(r) + pickupGraceMs() &&
+        d.diff(r).affectedKeys().hasOnly(['status','collectedAt']);
+    }
+    // "Mark ready" in Han's vendor reservations screen.
+    function validReady() {
+      let d = request.resource.data;
+      let r = resource.data;
+      return owningVendor(r) && r.status == 'reserved' && d.status == 'ready' && d.readyAt == request.time &&
+        request.time.toMillis() <= slotEndOf(r) + pickupGraceMs() &&
+        d.diff(r).affectedKeys().hasOnly(['status','readyAt']);
+    }
+    // "Not collected": only once collection is no longer possible. Stock is not
+    // returned, as in Han's prototype, until TBS decides otherwise.
+    function validNoShow() {
+      let d = request.resource.data;
+      let r = resource.data;
+      return owningVendor(r) && openOrder(r) && d.status == 'noshow' && d.noshowAt == request.time &&
+        request.time.toMillis() > slotEndOf(r) + pickupGraceMs() &&
+        d.diff(r).affectedKeys().hasOnly(['status','noshowAt']);
     }
     // Students cancel until the window ends; vendors also clear no-shows afterwards.
     function validCancellation(id) {
@@ -184,10 +238,10 @@ service cloud.firestore {
       let r = resource.data;
       let listing = /databases/$(database)/documents/listings/$(r.listingId);
       let claim = /databases/$(database)/documents/listings/$(r.listingId)/claims/$(r.customerId);
-      return signedIn() && r.status == 'reserved' && d.status == 'cancelled' &&
+      return signedIn() && openOrder(r) && d.status == 'cancelled' &&
         d.cancelledAt == request.time && d.cancelledBy == request.auth.uid &&
         d.diff(r).affectedKeys().hasOnly(['status','cancelledAt','cancelledBy']) &&
-        ((r.customerId == request.auth.uid && request.time.toMillis() < r.pickupEnd) ||
+        ((r.customerId == request.auth.uid && request.time.toMillis() < slotEndOf(r)) ||
           (r.vendorId == request.auth.uid && approvedVendor(request.auth.uid))) &&
         getAfter(listing).data.stock == get(listing).data.stock + r.quantity &&
         getAfter(listing).data.lastReleaseId == id &&
@@ -198,7 +252,26 @@ service cloud.firestore {
         resource.data.customerId == request.auth.uid || resource.data.vendorId == request.auth.uid || admin());
       allow list: if signedIn() && (resource.data.customerId == request.auth.uid || resource.data.vendorId == request.auth.uid || admin());
       allow create: if validReservation(id);
-      allow update: if validCollection() || validCancellation(id);
+      allow update: if validCollection() || validCancellation(id) || validReady() || validNoShow();
+      allow delete: if false;
+    }
+    // One document per vendor and code, so two open orders never share a code.
+    // A code is free again once its order can no longer be collected.
+    function validCodeLock(vendorId, code) {
+      let d = request.resource.data;
+      let first = getAfter(/databases/$(database)/documents/reservations/$(d.reservationId)).data;
+      return hasRole('customer') && code.matches('[0-9]{4}') &&
+        d.keys().hasAll(['orderId','reservationId','until']) && d.keys().hasOnly(['orderId','reservationId','until']) &&
+        !exists(/databases/$(database)/documents/reservations/$(d.reservationId)) &&
+        first.customerId == request.auth.uid && first.vendorId == vendorId &&
+        first.pickupCode == code && first.orderId == d.orderId &&
+        d.until == first.slotEnd + pickupGraceMs();
+    }
+    match /vendors/{vendorId}/pickupCodes/{code} {
+      // Customers check whether a code is free; it reveals no order details.
+      allow get: if signedIn();
+      allow create: if validCodeLock(vendorId, code);
+      allow update: if resource.data.until < request.time.toMillis() && validCodeLock(vendorId, code);
       allow delete: if false;
     }
     match /{document=**} { allow read, write: if false; }
