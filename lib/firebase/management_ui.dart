@@ -63,6 +63,7 @@ class AdminLayout extends StatelessWidget {
         'Notifications' => Icons.notifications_outlined,
         'Settings' => Icons.settings_outlined,
         'Profile' => Icons.person_outline,
+        'Administrators' => Icons.manage_accounts_outlined,
         _ => Icons.history,
       };
 

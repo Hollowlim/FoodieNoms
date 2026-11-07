@@ -1,1 +1,1 @@
-{"indexes": [], "fieldOverrides": []}
+{"indexes": [], "fieldOverrides": [{"collectionGroup":"listingPhotos","fieldPath":"bytes","indexes":[]}]}

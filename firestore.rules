@@ -14,21 +14,50 @@ service cloud.firestore {
         data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
         data.name.matches('.*[^ ].*') &&
         data.role in ['customer', 'vendor'] && data.approved == false &&
-        data.createdAt == request.time;
+        data.createdAt == request.time &&
+        (data.role != 'vendor' || initialBusiness(
+          getAfter(/databases/$(database)/documents/vendorBusinesses/$(uid)).data,
+          uid, data.name, false));
     }
-    function approveVendor() {
+    // The existing administrator provisions a separate, newly created Auth user.
+    // admin() reads the actor's existing profile, so a batch cannot bootstrap it.
+    function validNewAdminProfile(uid) {
       let data = request.resource.data;
-      return admin() && resource.data.role == 'vendor' &&
-        resource.data.approved == false && data.approved == true &&
-        data.approvedBy == request.auth.uid && data.approvedAt == request.time &&
-        data.diff(resource.data).affectedKeys().hasOnly(['approved', 'approvedBy', 'approvedAt']);
+      return admin() && uid != request.auth.uid &&
+        !exists(/databases/$(database)/documents/users/$(uid)) &&
+        data.keys().hasAll(['name', 'email', 'role', 'approved', 'createdBy', 'createdAt']) &&
+        data.keys().hasOnly(['name', 'email', 'role', 'approved', 'createdBy', 'createdAt']) &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+        data.name.matches('.*[^ ].*') &&
+        data.email is string && data.email.size() > 0 && data.email.size() <= 254 &&
+        data.email.matches('[^ @]+@[^ @]+') &&
+        data.role == 'admin' && data.approved == true &&
+        data.createdBy == request.auth.uid && data.createdAt == request.time;
+    }
+    function businessApprovalMirrored(uid, approved) {
+      let path = /databases/$(database)/documents/vendorBusinesses/$(uid);
+      return getAfter(path).data.approved == approved &&
+        getAfter(path).data.updatedAt == request.time;
+    }
+    function changeVendorApproval(uid) {
+      let data = request.resource.data;
+      return admin() && uid != request.auth.uid && resource.data.role == 'vendor' &&
+        data.approved is bool && data.approved != resource.data.approved &&
+        businessApprovalMirrored(uid, data.approved) &&
+        ((data.approved == true &&
+          data.approvedBy == request.auth.uid && data.approvedAt == request.time &&
+          data.diff(resource.data).affectedKeys().hasOnly(['approved', 'approvedBy', 'approvedAt'])) ||
+        (data.approved == false &&
+          data.revokedBy == request.auth.uid && data.revokedAt == request.time &&
+          nonblankText(data.revocationReason, 300) &&
+          data.diff(resource.data).affectedKeys().hasOnly(['approved', 'revokedBy', 'revokedAt', 'revocationReason'])));
     }
     match /users/{uid} {
       allow get: if signedIn() && (request.auth.uid == uid || admin());
-      // An admin may query vendor applications, not the customer directory.
-      allow list: if admin() && resource.data.role == 'vendor';
-      allow create: if validNewProfile(uid);
-      allow update: if approveVendor();
+      // Administrators can review vendors and administrators, not the customer directory.
+      allow list: if admin() && resource.data.role in ['vendor', 'admin'];
+      allow create: if validNewProfile(uid) || validNewAdminProfile(uid);
+      allow update: if changeVendorApproval(uid);
       allow delete: if false;
     }
     function hasRole(role) {
@@ -41,6 +70,161 @@ service cloud.firestore {
     function boundedText(value, max) {
       return value is string && value.size() > 0 && value.size() <= max;
     }
+    function nonblankText(value, max) {
+      return boundedText(value, max) && value.matches('.*[^ \\t\\r\\n].*');
+    }
+    function pilotCoordinates(latitude, longitude) {
+      return latitude is number && longitude is number &&
+        // Approximate FoodieNoms Subang/USJ pilot area, not a municipal border.
+        latitude >= 2.98 && latitude <= 3.12 &&
+        longitude >= 101.54 && longitude <= 101.64;
+    }
+    function optionalCoordinates(d) {
+      return (!('latitude' in d) && !('longitude' in d)) ||
+        (d.keys().hasAll(['latitude','longitude']) && pilotCoordinates(d.latitude, d.longitude));
+    }
+    function reservationCoordinates(d, listing) {
+      return (!('latitude' in listing) && !('longitude' in listing) &&
+          !('latitude' in d) && !('longitude' in d)) ||
+        (listing.keys().hasAll(['latitude','longitude']) &&
+          d.keys().hasAll(['latitude','longitude']) &&
+          optionalCoordinates(d) &&
+          d.latitude == listing.latitude && d.longitude == listing.longitude);
+    }
+    function businessShape(d, uid) {
+      return d.keys().hasAll(['vendorId','businessName','address','latitude','longitude','approved','configured','updatedAt']) &&
+        d.keys().hasOnly(['vendorId','businessName','address','latitude','longitude','approved','configured','updatedAt']) &&
+        d.vendorId == uid && nonblankText(d.businessName, 100) &&
+        d.address is string && d.address.size() <= 300 &&
+        d.approved is bool && d.configured is bool && d.updatedAt == request.time &&
+        ((d.configured == false && d.address == '' && d.latitude == null && d.longitude == null) ||
+          (d.configured == true && nonblankText(d.address, 300) && pilotCoordinates(d.latitude, d.longitude)));
+    }
+    function initialBusiness(d, uid, name, approved) {
+      return businessShape(d, uid) && d.configured == false &&
+        d.businessName == name && d.approved == approved;
+    }
+    function ownerBusiness(uid) {
+      let profile = get(/databases/$(database)/documents/users/$(uid)).data;
+      let d = request.resource.data;
+      return signedIn() && request.auth.uid == uid && profile.role == 'vendor' &&
+        businessShape(d, uid) && d.configured == true && d.approved == profile.approved;
+    }
+    function initialOwnBusiness(uid) {
+      let path = /databases/$(database)/documents/users/$(uid);
+      let profile = getAfter(path).data;
+      return signedIn() && request.auth.uid == uid && !exists(path) &&
+        profile.role == 'vendor' && initialBusiness(request.resource.data, uid, profile.name, false);
+    }
+    function adminInitialBusiness(uid) {
+      let profile = getAfter(/databases/$(database)/documents/users/$(uid)).data;
+      return admin() && uid != request.auth.uid && profile.role == 'vendor' &&
+        initialBusiness(request.resource.data, uid, profile.name, profile.approved);
+    }
+    function adminBusinessStatus(uid) {
+      let profile = getAfter(/databases/$(database)/documents/users/$(uid)).data;
+      let d = request.resource.data;
+      return admin() && uid != request.auth.uid && profile.role == 'vendor' &&
+        // Approval changes preserve saved location data, including an older
+        // point outside a subsequently tightened pilot service area.
+        d.approved is bool && d.updatedAt == request.time && d.approved == profile.approved &&
+        d.diff(resource.data).affectedKeys().hasOnly(['approved','updatedAt']);
+    }
+    match /vendorBusinesses/{uid} {
+      allow get: if signedIn() && (admin() ||
+        (request.auth.uid == uid && hasRole('vendor')) || resource.data.approved == true);
+      allow list: if signedIn() && (admin() || resource.data.approved == true);
+      allow create: if initialOwnBusiness(uid) || ownerBusiness(uid) || adminInitialBusiness(uid);
+      allow update: if (ownerBusiness(uid) && request.resource.data.approved == resource.data.approved) ||
+        adminBusinessStatus(uid);
+      allow delete: if false;
+    }
+    function businessListingIdentity(d, uid) {
+      let path = /databases/$(database)/documents/vendorBusinesses/$(uid);
+      let business = get(path).data;
+      return exists(path) && business.configured == true && business.approved == true &&
+        d.vendorName == business.businessName && d.address == business.address &&
+        d.keys().hasAll(['latitude','longitude']) &&
+        d.latitude == business.latitude && d.longitude == business.longitude;
+    }
+    function optionalText(d, key, max) {
+      return !(key in d) || (d[key] is string && d[key].size() <= max);
+    }
+    function validDietaryTags(d) {
+      return !('dietaryTags' in d) || (d.dietaryTags is list && d.dietaryTags.size() <= 4 &&
+        d.dietaryTags.hasOnly(['Vegetarian','Vegan','Gluten-free','Dairy-free']) &&
+        d.dietaryTags.toSet().size() == d.dietaryTags.size());
+    }
+    function validFoodMetadata(d) {
+      return optionalText(d, 'foodDescription', 1000) && optionalText(d, 'ingredients', 500) &&
+        optionalText(d, 'allergens', 500) && optionalText(d, 'pickupInstructions', 500) &&
+        validDietaryTags(d) && (!('halalStatus' in d) || d.halalStatus in ['not_declared','vendor_declared']);
+    }
+    function validPhotoId(id) { return id is string && id.matches('[a-f0-9]{32}'); }
+    function ownPhoto(id, uid) {
+      return validPhotoId(id) && get(/databases/$(database)/documents/listingPhotos/$(id)).data.vendorId == uid;
+    }
+    function listingPhoto(d, uid) {
+      return !('imageId' in d) || (ownPhoto(d.imageId, uid) &&
+        getAfter(/databases/$(database)/documents/listingPhotos/$(d.imageId)).data.published == true);
+    }
+    function partialForm(d, uid) {
+      return d is map && d.keys().hasOnly(['title','category','description','foodDescription','ingredients','allergens',
+          'dietaryTags','halalStatus','dietary','priceText','originalPriceText','quantityText','startsNow',
+          'pickupStart','pickupEnd','pickupInstructions','imageKey','imageId']) &&
+        optionalText(d, 'title', 100) && optionalText(d, 'category', 30) &&
+        (!('category' in d) || d.category in ['','Bakery','Meals','Pastries','Other']) &&
+        optionalText(d, 'description', 1000) && optionalText(d, 'dietary', 500) && validFoodMetadata(d) &&
+        optionalText(d, 'priceText', 20) && optionalText(d, 'originalPriceText', 20) &&
+        optionalText(d, 'quantityText', 8) && (!('startsNow' in d) || d.startsNow is bool) &&
+        (!('pickupStart' in d) || d.pickupStart == null || d.pickupStart is int) &&
+        (!('pickupEnd' in d) || d.pickupEnd == null || d.pickupEnd is int) &&
+        (!('imageKey' in d) || d.imageKey == null || d.imageKey in ['photo-0','photo-1','photo-2','photo-3']) &&
+        (!('imageId' in d) || d.imageId == null || ownPhoto(d.imageId, uid));
+    }
+    function validDraft(uid, id) {
+      let d = request.resource.data;
+      return signedIn() && request.auth.uid == uid && approvedVendor(uid) && validPhotoId(id) &&
+        d.keys().hasAll(['vendorId','formVersion','formData','sourceListingId','createdAt','updatedAt']) &&
+        d.keys().hasOnly(['vendorId','formVersion','formData','sourceListingId','createdAt','updatedAt']) &&
+        d.vendorId == uid && d.formVersion == 1 && partialForm(d.formData, uid) &&
+        (d.sourceListingId == null || (d.sourceListingId is string &&
+          d.sourceListingId.matches('[A-Za-z0-9_-]{1,128}') &&
+          get(/databases/$(database)/documents/listings/$(d.sourceListingId)).data.vendorId == uid)) &&
+        d.updatedAt == request.time;
+    }
+    match /listingDrafts/{uid}/items/{id} {
+      allow read: if signedIn() && request.auth.uid == uid && hasRole('vendor');
+      allow create: if validDraft(uid, id) && request.resource.data.createdAt == request.time;
+      allow update: if validDraft(uid, id) && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if signedIn() && request.auth.uid == uid && approvedVendor(uid);
+    }
+    function validPhotoUpload(id) {
+      let d = request.resource.data;
+      return signedIn() && approvedVendor(request.auth.uid) && validPhotoId(id) &&
+        d.keys().hasAll(['vendorId','bytes','contentType','published','firstListingId','createdAt']) &&
+        d.keys().hasOnly(['vendorId','bytes','contentType','published','firstListingId','createdAt']) &&
+        d.vendorId == request.auth.uid && d.bytes is bytes && d.bytes.size() > 0 && d.bytes.size() <= 163840 &&
+        d.contentType == 'image/jpeg' && d.published == false && d.firstListingId == '' && d.createdAt == request.time;
+    }
+    function publishPhoto(id) {
+      let d = request.resource.data;
+      let path = /databases/$(database)/documents/listings/$(d.firstListingId);
+      return signedIn() && approvedVendor(request.auth.uid) && resource.data.vendorId == request.auth.uid &&
+        resource.data.published == false && d.published == true &&
+        d.firstListingId is string && d.firstListingId.matches('[A-Za-z0-9_-]{1,128}') &&
+        d.diff(resource.data).affectedKeys().hasOnly(['published','firstListingId']) &&
+        getAfter(path).data.vendorId == request.auth.uid && getAfter(path).data.imageId == id &&
+        (!exists(path) || getAfter(path).data.diff(get(path).data).affectedKeys().hasAny(['imageId']));
+    }
+    match /listingPhotos/{id} {
+      allow get: if signedIn() && (!exists(/databases/$(database)/documents/listingPhotos/$(id)) ||
+        resource.data.vendorId == request.auth.uid || admin() ||
+        (resource.data.published == true && approvedVendor(resource.data.vendorId)));
+      allow create: if validPhotoUpload(id);
+      allow update: if publishPhoto(id);
+      allow delete, list: if false;
+    }
     function validDetails(d) {
       return boundedText(d.title,100) && boundedText(d.description,1000) &&
         boundedText(d.address,300) && boundedText(d.dietary,500) &&
@@ -51,15 +235,17 @@ service cloud.firestore {
         d.originalPriceCents is int && d.originalPriceCents >= d.priceCents && d.originalPriceCents <= 1000000 &&
         d.stock is int && d.stock <= 10000 &&
         d.pickupStart is int && d.pickupEnd is int &&
-        d.pickupEnd > d.pickupStart && d.pickupEnd <= request.time.toMillis() + 2592000000;
+        d.pickupEnd > d.pickupStart && d.pickupEnd <= request.time.toMillis() + 2592000000 &&
+        optionalCoordinates(d) && validFoodMetadata(d);
     }
     function validListing() {
       let d = request.resource.data;
       return signedIn() && d.vendorId == request.auth.uid && approvedVendor(request.auth.uid) &&
         d.keys().hasAll(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','vendorId','vendorName','active','createdAt']) &&
-        d.keys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','vendorId','vendorName','active','createdAt','imageKey']) &&
+        d.keys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','vendorId','vendorName','active','createdAt','imageKey','latitude','longitude','foodDescription','ingredients','allergens','dietaryTags','halalStatus','pickupInstructions','imageId']) &&
         validDetails(d) &&
-        d.vendorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name &&
+        d.originalPriceCents > d.priceCents && listingPhoto(d, request.auth.uid) &&
+        businessListingIdentity(d, request.auth.uid) &&
         // Vendors publish close to closing time, so a window may start now.
         d.stock > 0 && d.pickupStart >= request.time.toMillis() - 300000 &&
         d.pickupEnd > request.time.toMillis() &&
@@ -69,14 +255,28 @@ service cloud.firestore {
     function ownerEdit() {
       let d = request.resource.data;
       return signedIn() && resource.data.vendorId == request.auth.uid && approvedVendor(request.auth.uid) &&
-        d.diff(resource.data).affectedKeys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','imageKey']) &&
+        !('removedAt' in resource.data) &&
+        d.diff(resource.data).affectedKeys().hasOnly(['title','description','address','dietary','category','priceCents','originalPriceCents','stock','pickupStart','pickupEnd','imageKey','vendorName','latitude','longitude','foodDescription','ingredients','allergens','dietaryTags','halalStatus','pickupInstructions','imageId']) &&
+        (!d.diff(resource.data).affectedKeys().hasAny(['priceCents','originalPriceCents']) || d.originalPriceCents > d.priceCents) &&
+        (!d.diff(resource.data).affectedKeys().hasAny(['imageId']) || listingPhoto(d, request.auth.uid)) &&
+        (!d.diff(resource.data).affectedKeys().hasAny(['vendorName','address','latitude','longitude']) ||
+          businessListingIdentity(d, request.auth.uid)) &&
         validDetails(d) && d.stock >= 0 && d.pickupEnd > request.time.toMillis();
     }
     function ownerToggle() {
       let d = request.resource.data;
       return signedIn() && resource.data.vendorId == request.auth.uid && approvedVendor(request.auth.uid) &&
+        !('removedAt' in resource.data) &&
         d.active is bool && d.diff(resource.data).affectedKeys().hasOnly(['active']) &&
         (d.active == false || resource.data.pickupEnd > request.time.toMillis());
+    }
+    // Removal stops sales without breaking order snapshots or inventory releases.
+    function ownerRemove() {
+      let d = request.resource.data;
+      return signedIn() && resource.data.vendorId == request.auth.uid &&
+        approvedVendor(request.auth.uid) && !('removedAt' in resource.data) &&
+        d.diff(resource.data).affectedKeys().hasOnly(['active','removedAt']) &&
+        ('removedAt' in d) && d.active == false && d.removedAt == request.time;
     }
     // Per student, per listing; 5 until agreed with TBS. Rules cannot count orders,
     // so listings/{id}/claims/{uid} keeps the running total of held items.
@@ -102,7 +302,7 @@ service cloud.firestore {
     function cancelledTogether(orderId, listingId) {
       let before = get(/databases/$(database)/documents/reservations/$(orderId)).data;
       let after = getAfter(/databases/$(database)/documents/reservations/$(orderId)).data;
-      return signedIn() && before.listingId == listingId && before.status == 'reserved' &&
+      return signedIn() && before.listingId == listingId && before.status in ['reserved','ready'] &&
         after.status == 'cancelled' && after.cancelledBy == request.auth.uid;
     }
     function inventoryRelease(listingId) {
@@ -137,7 +337,7 @@ service cloud.firestore {
         resource.data.active == true || resource.data.vendorId == request.auth.uid || admin());
       allow list: if signedIn() && (resource.data.active == true || resource.data.vendorId == request.auth.uid || admin());
       allow create: if validListing();
-      allow update: if ownerToggle() || ownerEdit() || inventoryReservation(id) || inventoryRelease(id);
+      allow update: if ownerRemove() || ownerToggle() || ownerEdit() || inventoryReservation(id) || inventoryRelease(id);
       allow delete: if false;
       match /claims/{uid} {
         allow get: if signedIn() && (request.auth.uid == uid ||
@@ -147,13 +347,42 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity','lastReservationId']));
       }
     }
+    // New short counter codes are linked atomically to a single reservation.
+    function pickupCodePath(vendorId, code) {
+      return /databases/$(database)/documents/vendors/$(vendorId)/pickupCodes/$(code);
+    }
+    function validReservationCode(d) {
+      let lock = getAfter(pickupCodePath(d.vendorId, d.pickupCode)).data;
+      return d.pickupCode is string && d.pickupCode.matches('[0-9]{4}') &&
+        lock.reservationId == d.code && lock.until == d.pickupEnd + pickupGraceMs();
+    }
+    function validPickupCodeLock(vendorId, code) {
+      let d = request.resource.data;
+      let order = getAfter(/databases/$(database)/documents/reservations/$(d.reservationId)).data;
+      return hasRole('customer') && code.matches('[0-9]{4}') &&
+        d.keys().hasAll(['reservationId','until']) && d.keys().hasOnly(['reservationId','until']) &&
+        d.reservationId is string && d.reservationId.matches('FN-[A-F0-9]{20}') && d.until is int &&
+        !exists(/databases/$(database)/documents/reservations/$(d.reservationId)) &&
+        order.customerId == request.auth.uid && order.vendorId == vendorId &&
+        order.pickupCode == code && order.code == d.reservationId &&
+        d.until == order.pickupEnd + pickupGraceMs();
+    }
+    match /vendors/{vendorId}/pickupCodes/{code} {
+      // Allocation reads reveal only an opaque reference and its expiry, never order details.
+      allow get: if signedIn();
+      allow create: if validPickupCodeLock(vendorId, code);
+      allow update: if resource.data.until < request.time.toMillis() && validPickupCodeLock(vendorId, code);
+      allow list, delete: if false;
+    }
     function validReservation(id) {
       let d = request.resource.data;
       let listing = get(/databases/$(database)/documents/listings/$(d.listingId)).data;
       let nextListing = getAfter(/databases/$(database)/documents/listings/$(d.listingId)).data;
       return hasRole('customer') && id.matches('FN-[A-F0-9]{20}') && d.code == id &&
         d.keys().hasAll(['customerId','vendorId','listingId','title','vendorName','address','pickupStart','pickupEnd','quantity','unitPriceCents','totalCents','status','code','paymentStatus','createdAt']) &&
-        d.keys().hasOnly(['customerId','vendorId','listingId','title','vendorName','address','pickupStart','pickupEnd','quantity','unitPriceCents','totalCents','status','code','paymentStatus','createdAt']) &&
+        d.keys().hasOnly(['customerId','vendorId','listingId','title','vendorName','address','pickupStart','pickupEnd','quantity','unitPriceCents','totalCents','status','code','paymentStatus','createdAt','latitude','longitude','pickupCode']) &&
+        (!('pickupCode' in d) || validReservationCode(d)) &&
+        reservationCoordinates(d, listing) &&
         d.customerId == request.auth.uid && d.vendorId == listing.vendorId && approvedVendor(listing.vendorId) &&
         d.title == listing.title && d.vendorName == listing.vendorName && d.address == listing.address &&
         d.pickupStart is int && d.pickupEnd is int &&
@@ -173,10 +402,26 @@ service cloud.firestore {
     function validCollection() {
       let d = request.resource.data;
       return signedIn() && approvedVendor(request.auth.uid) && resource.data.vendorId == request.auth.uid &&
-        resource.data.status == 'reserved' && d.status == 'collected' && d.collectedAt == request.time &&
+        resource.data.status in ['reserved','ready'] && d.status == 'collected' && d.collectedAt == request.time &&
         request.time.toMillis() >= resource.data.pickupStart - pickupGraceMs() &&
         request.time.toMillis() <= resource.data.pickupEnd + pickupGraceMs() &&
         d.diff(resource.data).affectedKeys().hasOnly(['status','collectedAt']);
+    }
+    function validReady() {
+      let d = request.resource.data;
+      let r = resource.data;
+      return signedIn() && approvedVendor(request.auth.uid) && r.vendorId == request.auth.uid &&
+        r.status == 'reserved' && d.status == 'ready' && d.readyAt == request.time &&
+        request.time.toMillis() <= r.pickupEnd + pickupGraceMs() &&
+        d.diff(r).affectedKeys().hasOnly(['status','readyAt']);
+    }
+    function validNoShow() {
+      let d = request.resource.data;
+      let r = resource.data;
+      return signedIn() && approvedVendor(request.auth.uid) && r.vendorId == request.auth.uid &&
+        r.status in ['reserved','ready'] && d.status == 'noshow' && d.noshowAt == request.time &&
+        request.time.toMillis() > r.pickupEnd + pickupGraceMs() &&
+        d.diff(r).affectedKeys().hasOnly(['status','noshowAt']);
     }
     // Students cancel until the window ends; vendors also clear no-shows afterwards.
     function validCancellation(id) {
@@ -184,7 +429,7 @@ service cloud.firestore {
       let r = resource.data;
       let listing = /databases/$(database)/documents/listings/$(r.listingId);
       let claim = /databases/$(database)/documents/listings/$(r.listingId)/claims/$(r.customerId);
-      return signedIn() && r.status == 'reserved' && d.status == 'cancelled' &&
+      return signedIn() && r.status in ['reserved','ready'] && d.status == 'cancelled' &&
         d.cancelledAt == request.time && d.cancelledBy == request.auth.uid &&
         d.diff(r).affectedKeys().hasOnly(['status','cancelledAt','cancelledBy']) &&
         ((r.customerId == request.auth.uid && request.time.toMillis() < r.pickupEnd) ||
@@ -198,7 +443,7 @@ service cloud.firestore {
         resource.data.customerId == request.auth.uid || resource.data.vendorId == request.auth.uid || admin());
       allow list: if signedIn() && (resource.data.customerId == request.auth.uid || resource.data.vendorId == request.auth.uid || admin());
       allow create: if validReservation(id);
-      allow update: if validCollection() || validCancellation(id);
+      allow update: if validCollection() || validCancellation(id) || validReady() || validNoShow();
       allow delete: if false;
     }
     match /{document=**} { allow read, write: if false; }

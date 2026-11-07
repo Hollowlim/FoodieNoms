@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'business_location.dart';
 
 class PilotLocation extends ChangeNotifier {
   bool _closed = false, _gpsEnabled = false, _foreground = true;
@@ -9,7 +10,12 @@ class PilotLocation extends ChangeNotifier {
   Position? position;
   bool busy = false;
   String? message;
-  String get area => usingGps ? 'Current location' : 'Subang Jaya, Selangor';
+  String get area =>
+      outsideServiceArea ? 'Outside service area' : 'Subang Jaya, Selangor';
+  bool get inServiceArea =>
+      position != null &&
+      isPilotShopLocation(position!.latitude, position!.longitude);
+  bool get outsideServiceArea => position != null && !inServiceArea;
   bool get usingGps => _gpsEnabled && position != null;
   bool get tracking => _updates != null;
 
@@ -60,6 +66,12 @@ class PilotLocation extends ChangeNotifier {
     _updates = Geolocator.getPositionStream(locationSettings: _settings).listen(
         (value) {
       if (_closed || version != _streamVersion) return;
+      if (!_validFix(value)) {
+        message =
+            'Unable to read your location. Try again or browse Subang Jaya.';
+        notifyListeners();
+        return;
+      }
       position = value;
       message = null;
       notifyListeners();
@@ -97,13 +109,17 @@ class PilotLocation extends ChangeNotifier {
     position = null;
     message = null;
     notifyListeners();
+    bool currentRequest() => !_closed && request == _request;
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!currentRequest()) return;
+      if (!enabled) {
         message =
             'Location services are off. Turn them on or browse Subang Jaya manually.';
         return;
       }
       var permission = await Geolocator.checkPermission();
+      if (!currentRequest()) return;
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
@@ -119,16 +135,26 @@ class PilotLocation extends ChangeNotifier {
               accuracy: LocationAccuracy.high,
               timeLimit: Duration(seconds: 20)));
       if (_closed || request != _request) return;
+      if (!_validFix(current)) {
+        message =
+            'Unable to read your location. Try again or browse Subang Jaya.';
+        return;
+      }
       position = current;
       _gpsEnabled = true;
       _startUpdates();
-      message =
-          'Your location is shown on the map. FoodieNoms listings currently cover the Subang Jaya pilot.';
+      message = outsideServiceArea
+          ? 'Outside service area. FoodieNoms currently serves the Subang Jaya pilot area only.'
+          : 'Your location is inside the Subang Jaya service area.';
     } on TimeoutException {
-      message = 'Location took too long. Try again or browse manually.';
+      if (currentRequest()) {
+        message = 'Location took too long. Try again or browse manually.';
+      }
     } catch (_) {
-      message =
-          'Unable to get your location. You can continue browsing manually.';
+      if (currentRequest()) {
+        message =
+            'Unable to get your location. You can continue browsing manually.';
+      }
     } finally {
       if (!_closed && request == _request) {
         busy = false;
@@ -136,6 +162,14 @@ class PilotLocation extends ChangeNotifier {
       }
     }
   }
+
+  bool _validFix(Position value) =>
+      value.latitude.isFinite &&
+      value.longitude.isFinite &&
+      value.latitude >= -90 &&
+      value.latitude <= 90 &&
+      value.longitude >= -180 &&
+      value.longitude <= 180;
 
   @override
   void dispose() {

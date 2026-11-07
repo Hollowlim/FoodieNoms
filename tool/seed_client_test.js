@@ -16,4 +16,6 @@ async function seed(email, name, role, approved) {
 (async () => {
   await seed('vendor@example.test', 'Subang Cafe', 'vendor', true);
   await seed('student@example.test', 'Student', 'customer', false);
+  await seed('admin@example.test', 'Owner Admin', 'admin', true);
 })();
+

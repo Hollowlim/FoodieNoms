@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -7,12 +8,18 @@ import 'service.dart';
 import 'customer_preview.dart';
 import 'student_ui.dart';
 import 'reference_assets.dart';
+import 'listing_editor.dart';
+import 'listing_photo.dart';
 import 'live_location_map.dart';
-import 'admin_preview.dart';
+import 'customer_map_panel.dart';
 import 'management_ui.dart';
-
-const _adminDemoUsername = String.fromEnvironment('ADMIN_DEMO_USERNAME');
-const _adminDemoPassword = String.fromEnvironment('ADMIN_DEMO_PASSWORD');
+import 'pickup_ui.dart';
+import 'student_experience.dart';
+import 'vendor_ui.dart';
+import 'password_recovery.dart';
+import 'admin_accounts.dart';
+import 'vendor_business.dart';
+import 'vendor_management.dart';
 
 const _green = Color(0xFF153D29);
 const _cream = Color(0xFFFFFCF5);
@@ -159,6 +166,7 @@ class _AuthScreenState extends State<AuthScreen> {
   final name = TextEditingController();
   final form = GlobalKey<FormState>();
   bool register = false;
+  bool showPassword = false;
   bool busy = false;
   String role = 'customer';
   String? error;
@@ -172,20 +180,6 @@ class _AuthScreenState extends State<AuthScreen> {
 
   Future<void> submit() async {
     if (!form.currentState!.validate()) return;
-    if (!register &&
-        !widget.completeProfile &&
-        _adminDemoUsername.isNotEmpty &&
-        _adminDemoPassword.isNotEmpty &&
-        email.text.trim() == _adminDemoUsername) {
-      if (password.text != _adminDemoPassword) {
-        setState(() => error = 'Incorrect admin demo password.');
-        return;
-      }
-      password.clear();
-      await Navigator.of(context)
-          .push(MaterialPageRoute<void>(builder: (_) => const AdminPreview()));
-      return;
-    }
     setState(() {
       busy = true;
       error = null;
@@ -198,6 +192,8 @@ class _AuthScreenState extends State<AuthScreen> {
         // separate lets a user retry if the Firestore connection is unavailable.
         await widget.service.auth.createUserWithEmailAndPassword(
             email: email.text.trim(), password: password.text);
+      } else if (!email.text.contains('@')) {
+        await widget.service.signInAdministrator(email.text, password.text);
       } else {
         await widget.service.auth.signInWithEmailAndPassword(
             email: email.text.trim(), password: password.text);
@@ -210,25 +206,19 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> resetPassword() async {
-    if (!email.text.contains('@')) {
-      setState(() => error = 'Enter your email first.');
-      return;
-    }
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      await widget.service.auth
-          .sendPasswordResetEmail(email: email.text.trim());
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('If an account exists, a reset link will be sent.')));
-      }
-    } catch (e) {
-      if (mounted) setState(() => error = firebaseMessage(e));
-    } finally {
-      if (mounted) setState(() => busy = false);
+    if (busy) return;
+    await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+            builder: (_) => PasswordRecoveryScreen(
+                onSend: widget.service.requestPasswordReset,
+                initialEmail: initialRecoveryEmail(email.text))));
+    if (mounted) {
+      setState(() {
+        password.clear();
+        showPassword = false;
+        error = null;
+      });
     }
   }
 
@@ -282,33 +272,48 @@ class _AuthScreenState extends State<AuthScreen> {
                             busy ? null : (v) => setState(() => role = v!)),
                     const SizedBox(height: 12),
                     const Text(
-                        'Vendors need admin approval before publishing. Account type cannot be changed here.'),
+                        'Vendor accounts need approval before publishing. Account type cannot be changed here.'),
                   ] else ...[
                     TextFormField(
                         controller: email,
                         enabled: !busy,
                         keyboardType: TextInputType.emailAddress,
-                        autofillHints: const [AutofillHints.email],
+                        autofillHints: register
+                            ? const [AutofillHints.email]
+                            : const [AutofillHints.username],
                         decoration: InputDecoration(
                             labelText:
                                 register ? 'Email' : 'Email or username'),
-                        validator: (v) => !register && _adminDemoUsername.isNotEmpty &&
-                                _adminDemoPassword.isNotEmpty &&
-                                v?.trim() == _adminDemoUsername
-                            ? null
-                            : v == null || !v.contains('@')
+                        validator: (v) => v == null || v.trim().isEmpty
+                            ? register
+                                ? 'Enter your email address.'
+                                : 'Enter your email or username.'
+                            : register && !v.contains('@')
                                 ? 'Enter a valid email.'
                                 : null),
                     const SizedBox(height: 16),
                     TextFormField(
                         controller: password,
                         enabled: !busy,
-                        obscureText: true,
+                        obscureText: !showPassword,
+                        autocorrect: false,
+                        enableSuggestions: false,
                         autofillHints: register
                             ? const [AutofillHints.newPassword]
                             : const [AutofillHints.password],
-                        decoration:
-                            const InputDecoration(labelText: 'Password'),
+                        decoration: InputDecoration(
+                            labelText: 'Password',
+                            suffixIcon: IconButton(
+                                tooltip: showPassword
+                                    ? 'Hide password'
+                                    : 'Show password',
+                                onPressed: busy
+                                    ? null
+                                    : () => setState(
+                                        () => showPassword = !showPassword),
+                                icon: Icon(showPassword
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined))),
                         validator: (v) => v == null ||
                                 v.isEmpty ||
                                 (register && v.length < 8)
@@ -337,6 +342,7 @@ class _AuthScreenState extends State<AuthScreen> {
                             ? null
                             : () => setState(() {
                                   register = !register;
+                                  showPassword = false;
                                   error = null;
                                 }),
                         child: Text(register
@@ -380,11 +386,14 @@ class _AccountHomeState extends State<AccountHome> {
   Widget build(BuildContext context) {
     final role = widget.profile['role'] as String;
     final customer = role == 'customer';
-    final lastTab = customer
-        ? 3
-        : role == 'admin'
-            ? 1
-            : 2;
+    if (role == 'vendor' && widget.profile['approved'] != true) {
+      return VendorPendingScreen(
+          service: widget.service,
+          email: widget.user.email ?? '',
+          revoked: widget.profile['revokedAt'] != null,
+          reason: widget.profile['revocationReason'] as String?);
+    }
+    final lastTab = role == 'vendor' ? 2 : 3;
     final index = tab.clamp(0, lastTab);
     Widget body;
     if (index == lastTab) {
@@ -394,7 +403,14 @@ class _AccountHomeState extends State<AccountHome> {
           profile: widget.profile,
           location: location);
     } else if (role == 'admin') {
-      body = VendorApprovals(service: widget.service);
+      body = index == 0
+          ? AdminOverviewScreen(
+              service: widget.service,
+              onReviewVendors: () => setState(() => tab = 1),
+              onAdministrators: () => setState(() => tab = 2))
+          : index == 1
+              ? VendorManagementScreen(service: widget.service)
+              : AdminAccountsScreen(service: widget.service);
     } else if (customer && index == 1) {
       body = CustomerMap(
           service: widget.service, uid: widget.user.uid, location: location);
@@ -403,6 +419,7 @@ class _AccountHomeState extends State<AccountHome> {
           service: widget.service,
           uid: widget.user.uid,
           role: role,
+          onBrowse: () => setState(() => tab = 0),
           approved: widget.profile['approved'] == true);
     } else {
       body = CloudListings(
@@ -410,11 +427,12 @@ class _AccountHomeState extends State<AccountHome> {
           uid: widget.user.uid,
           role: role,
           approved: widget.profile['approved'] == true,
-          location: location);
+          location: location,
+          onReservations: () => setState(() => tab = 1));
     }
     if (role == 'admin') {
       return AdminLayout(
-          labels: const ['Vendors', 'Profile'],
+          labels: const ['Overview', 'Vendors', 'Administrators', 'Profile'],
           selected: index,
           onSelected: (value) => setState(() => tab = value),
           onSignOut: widget.service.auth.signOut,
@@ -487,7 +505,7 @@ class FoodieNavigation extends StatelessWidget {
   }
 }
 
-class AccountProfile extends StatelessWidget {
+class AccountProfile extends StatefulWidget {
   const AccountProfile(
       {super.key,
       required this.service,
@@ -498,6 +516,40 @@ class AccountProfile extends StatelessWidget {
   final FoodieService service;
   final User user;
   final Map<String, dynamic> profile;
+  @override
+  State<AccountProfile> createState() => _AccountProfileState();
+}
+
+class _AccountProfileState extends State<AccountProfile> {
+  Stream<Iterable<Map<String, dynamic>>>? _reservations;
+  FoodieService get service => widget.service;
+  User get user => widget.user;
+  Map<String, dynamic> get profile => widget.profile;
+  PilotLocation? get location => widget.location;
+
+  void _loadHistory() {
+    _reservations = profile['role'] == 'customer'
+        ? service.reservations('customer', user.uid).map((snapshot) =>
+            snapshot.docs.map((doc) => doc.data()).toList(growable: false))
+        : null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHistory();
+  }
+
+  @override
+  void didUpdateWidget(covariant AccountProfile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.service != service ||
+        oldWidget.user.uid != user.uid ||
+        oldWidget.profile['role'] != profile['role']) {
+      _loadHistory();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (profile['role'] == 'customer') {
@@ -521,6 +573,7 @@ class AccountProfile extends StatelessWidget {
       return StudentProfilePanel(
           name: profile['name'] as String,
           email: user.email ?? '',
+          reservations: _reservations,
           onPersonalInfo: () => showInfo(
               'Personal information',
               ListView(padding: const EdgeInsets.all(24), children: [
@@ -567,9 +620,24 @@ class AccountProfile extends StatelessWidget {
         Text(profile['approved'] == true
             ? 'Vendor approved'
             : 'Waiting for admin approval'),
+      const SizedBox(height: 16),
+      if (profile['role'] == 'vendor')
+        VendorBusinessSummary(service: service, uid: user.uid),
+      ListTile(
+          leading: const Icon(Icons.lock_outline),
+          title: const Text('Password & security'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => Scaffold(
+                      appBar: AppBar(title: const Text('Account settings')),
+                      body: PasswordSettings(
+                          service: service, email: user.email ?? ''))))),
       const SizedBox(height: 24),
-      const Text(
-          'Reservations are saved to your account. All orders are unpaid; online payments and cancellation are not available.'),
+      Text(profile['role'] == 'admin'
+          ? 'Review vendor applications, approve or revoke selling access, and manage separate administrator accounts.'
+          : 'Manage food listings, remaining stock and pickup reservations from your vendor dashboard. Orders are unpaid; collect payment at pickup. Reserved orders can be cancelled to return stock.'),
       const SizedBox(height: 24),
       OutlinedButton(
           onPressed: () async {
@@ -621,6 +689,76 @@ class Records extends StatelessWidget {
           });
 }
 
+/// Customer catalogues use public approval records; private user data stays private.
+class ApprovedVendorRecords extends StatefulWidget {
+  const ApprovedVendorRecords(
+      {super.key,
+      required this.service,
+      required this.stream,
+      required this.empty,
+      this.emptyView,
+      required this.builder});
+  final FoodieService service;
+  final Stream<QuerySnapshot<Map<String, dynamic>>> stream;
+  final String empty;
+  final Widget? emptyView;
+  final Widget Function(List<CloudDoc>) builder;
+  @override
+  State<ApprovedVendorRecords> createState() => _ApprovedVendorRecordsState();
+}
+
+class _ApprovedVendorRecordsState extends State<ApprovedVendorRecords> {
+  late final businesses = widget.service.db
+      .collection('vendorBusinesses')
+      .where('approved', isEqualTo: true)
+      .snapshots();
+  @override
+  Widget build(BuildContext context) =>
+      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: businesses,
+          builder: (context, state) {
+            if (state.hasError) {
+              return _Failure(message: firebaseMessage(state.error!));
+            }
+            if (!state.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final approved = state.data!.docs
+                .where((doc) => ShopMapPin.fromData(doc.id, doc.data()) != null)
+                .map((doc) => doc.id)
+                .toSet();
+            return Records(
+                stream: widget.stream,
+                empty: widget.empty,
+                emptyView: widget.emptyView,
+                builder: (docs) {
+                  final visible = docs.where((doc) {
+                    final data = doc.data();
+                    final hasCoordinates = data.containsKey('latitude') ||
+                        data.containsKey('longitude');
+                    return approved.contains(data['vendorId']) &&
+                        (!hasCoordinates ||
+                            ShopMapPin.fromData(doc.id, {
+                                  'configured': true,
+                                  'businessName': data['vendorName'],
+                                  'address': data['address'],
+                                  'latitude': data['latitude'],
+                                  'longitude': data['longitude'],
+                                }) !=
+                                null);
+                  }).toList();
+                  if (visible.isEmpty) {
+                    return widget.emptyView ??
+                        Center(
+                            child: Padding(
+                                padding: const EdgeInsets.all(24),
+                                child: Text(widget.empty)));
+                  }
+                  return widget.builder(visible);
+                });
+          });
+}
+
 class CloudListings extends StatefulWidget {
   const CloudListings(
       {super.key,
@@ -628,7 +766,9 @@ class CloudListings extends StatefulWidget {
       required this.uid,
       required this.role,
       required this.approved,
-      this.location});
+      this.location,
+      this.onReservations});
+  final VoidCallback? onReservations;
   final PilotLocation? location;
   final FoodieService service;
   final String uid, role;
@@ -641,254 +781,185 @@ class _CloudListingsState extends State<CloudListings> {
   late final stream = widget.service.listings(widget.role, widget.uid);
   String search = '';
   String category = 'All';
-  final pending = <String>{};
+  final searchController = TextEditingController();
+  void clearFilters() {
+    searchController.clear();
+    setState(() {
+      search = '';
+      category = 'All';
+    });
+  }
+
+  @override
+  void dispose() {
+    searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> openListing(
+      {String? id,
+      Map<String, dynamic>? initial,
+      String? draftId,
+      Map<String, dynamic>? draftData,
+      bool duplicate = false}) async {
+    Map<String, dynamic>? business;
+    try {
+      if (draftId != null && id != null) {
+        final source = await widget.service.db
+            .collection('listings')
+            .doc(id)
+            .get(const GetOptions(source: Source.server));
+        initial = source.data();
+        if (initial == null || initial['vendorId'] != widget.uid) {
+          throw StateError(
+              'The original listing is unavailable. Your saved draft is still kept.');
+        }
+      }
+      final ref =
+          widget.service.db.collection('vendorBusinesses').doc(widget.uid);
+      business =
+          (await ref.get(const GetOptions(source: Source.server))).data();
+      if (!mounted) return;
+      if (ShopMapPin.fromData(widget.uid, business ?? {}) == null) {
+        await Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => VendorBusinessScreen(service: widget.service)));
+        if (!mounted) return;
+        business =
+            (await ref.get(const GetOptions(source: Source.server))).data();
+      }
+      if (!mounted || ShopMapPin.fromData(widget.uid, business ?? {}) == null) {
+        return;
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(firebaseMessage(e))));
+      }
+      return;
+    }
+    if (!mounted) return;
+    final saved = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+            builder: (_) => ListingEditorScreen(
+                service: widget.service,
+                business: business!,
+                listingId: id,
+                initial: initial,
+                draftId: draftId,
+                draftData: draftData,
+                duplicate: duplicate)));
+    if (saved == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(id == null || duplicate
+              ? 'Food published! Students can reserve it now.'
+              : 'Listing updated.')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final vendor = widget.role == 'vendor';
+    if (widget.role == 'vendor') {
+      return VendorDashboard(
+          service: widget.service,
+          uid: widget.uid,
+          onAdd: () => openListing(),
+          onEdit: (id, data) => openListing(id: id, initial: data),
+          onResumeDraft: (id, record) => openListing(
+              id: record['sourceListingId'] as String?,
+              draftId: id,
+              draftData: Map<String, dynamic>.from(record['formData'] as Map)),
+          onDuplicate: (id, data) =>
+              openListing(id: id, initial: data, duplicate: true),
+          onReservations: widget.onReservations);
+    }
     return Column(children: [
-      if (vendor)
-        ConstrainedBox(
-            constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(context).height * 0.56),
-            child: SingleChildScrollView(
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                  const VendorBanner(),
-                  Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const Text('Vendor dashboard',
-                              style: TextStyle(
-                                  fontSize: 25,
-                                  fontWeight: FontWeight.w800,
-                                  color: managementInk)),
-                          const SizedBox(height: 16),
-                          ManagementCard(
-                              child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                StreamBuilder<
-                                        QuerySnapshot<Map<String, dynamic>>>(
-                                    stream: stream,
-                                    builder: (context, snapshot) => Text(
-                                        snapshot.hasError
-                                            ? 'Listings unavailable'
-                                            : 'Active listings: ${snapshot.hasData ? snapshot.data!.docs.where((d) => d.data()['active'] == true).length : '…'}',
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 17))),
-                                const SizedBox(height: 8),
-                                StreamBuilder<
-                                        QuerySnapshot<Map<String, dynamic>>>(
-                                    stream: widget.service
-                                        .reservations('vendor', widget.uid),
-                                    builder: (context, snapshot) => Text(snapshot
-                                            .hasError
-                                        ? 'Reservations unavailable'
-                                        : 'Pending reservations: ${snapshot.hasData ? snapshot.data!.docs.where((d) => d.data()['status'] == 'reserved').length : '…'}')),
-                              ])),
-                          Text(widget.approved
-                              ? 'Approved · Ready to publish'
-                              : 'Waiting for admin approval'),
-                          const SizedBox(height: 12),
-                          FilledButton.icon(
-                              onPressed: !widget.approved
-                                  ? null
-                                  : () => Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                          builder: (_) => PublishScreen(
-                                              service: widget.service))),
-                              icon: const Icon(Icons.add),
-                              label: const Text('Add Surplus Food')),
-                          const SizedBox(height: 18),
-                          const Text('Your listings',
-                              style: TextStyle(
-                                  fontSize: 21,
-                                  fontWeight: FontWeight.bold,
-                                  color: managementInk)),
-                        ],
-                      )),
-                ])))
-      else
-        StudentDiscoverHeader(
-            location: widget.location!,
-            onSearch: (value) =>
-                setState(() => search = value.trim().toLowerCase())),
-      if (!vendor)
-        Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                    children: ['All', 'Bakery', 'Meals', 'Pastries', 'Other']
-                        .map((value) => Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                                label: Text(value),
-                                selected: category == value,
-                                onSelected: (_) =>
-                                    setState(() => category = value))))
-                        .toList()))),
+      StudentDiscoverHeader(
+          searchController: searchController,
+          location: widget.location!,
+          onSearch: (value) =>
+              setState(() => search = value.trim().toLowerCase())),
+      Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                  children: ['All', 'Bakery', 'Meals', 'Pastries', 'Other']
+                      .map((value) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                              label: Text(value),
+                              selected: category == value,
+                              onSelected: (_) =>
+                                  setState(() => category = value))))
+                      .toList()))),
       Expanded(
-          child: Records(
+          child: ApprovedVendorRecords(
+              service: widget.service,
               stream: stream,
-              emptyView: vendor
-                  ? null
-                  : CustomerPreview(search: search, category: category),
-              empty: vendor
-                  ? 'No listings yet. Publish your first surplus meal once approved.'
-                  : 'No food available yet. Check back soon.',
+              emptyView: CustomerPreview(
+                  search: search,
+                  category: category,
+                  onClearFilters: clearFilters),
+              empty: 'No food available yet. Check back soon.',
               builder: (docs) {
                 final results = docs.where((doc) {
                   final d = doc.data();
-                  return vendor ||
-                      ((d['pickupEnd'] as int) >
-                              DateTime.now().millisecondsSinceEpoch &&
-                          (category == 'All' || category == d['category']) &&
-                          '${d['title']} ${d['vendorName']}'
-                              .toLowerCase()
-                              .contains(search));
+                  return (d['stock'] as int) > 0 &&
+                      (d['pickupEnd'] as int) >
+                          DateTime.now().millisecondsSinceEpoch &&
+                      (category == 'All' || category == d['category']) &&
+                      '${d['title']} ${d['vendorName']}'
+                          .toLowerCase()
+                          .contains(search);
                 }).toList()
                   ..sort((a, b) => (a.data()['pickupStart'] as int)
                       .compareTo(b.data()['pickupStart'] as int));
                 if (results.isEmpty) {
-                  return const Center(
-                      child: Text('No matching food. Try another filter.'));
+                  return StudentEmptyState(
+                      title: search.isNotEmpty || category != 'All'
+                          ? 'No matching food'
+                          : 'No food available right now',
+                      message: search.isNotEmpty || category != 'All'
+                          ? 'Try another food category or clear your search.'
+                          : 'Today’s deals may have sold out or ended. Check back for new food from nearby vendors.',
+                      actionLabel: 'Clear filters',
+                      onAction: search.isNotEmpty || category != 'All'
+                          ? clearFilters
+                          : null);
                 }
-                if (!vendor) {
-                  return ListView(padding: const EdgeInsets.all(16), children: [
-                    const Text("Today's rescue deals",
-                        style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: studentDark)),
-                    const SizedBox(height: 14),
-                    ...results.map((doc) {
-                      final d = doc.data();
-                      return StudentDealTile(
-                          title: d['title'] as String,
-                          price: money(d['priceCents']),
-                          original: money(d['originalPriceCents']),
-                          subtitle: '${d['stock']} left · ${d['vendorName']}',
-                          emoji: d['category'] == 'Meals'
-                              ? '🍱'
-                              : d['category'] == 'Pastries'
-                                  ? '🧁'
-                                  : '🥐',
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => ReservationScreen(
-                                      service: widget.service,
-                                      listingId: doc.id))));
-                    }),
-                  ]);
-                }
-                return ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    itemCount: results.length,
-                    itemBuilder: (context, i) {
-                      final doc = results[i];
-                      final d = doc.data();
-                      return Card(
-                          child: InkWell(
-                              onTap: vendor
-                                  ? null
-                                  : () => Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                          builder: (_) => ReservationScreen(
-                                              service: widget.service,
-                                              listingId: doc.id))),
-                              child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(d['vendorName'] as String,
-                                            style:
-                                                const TextStyle(color: _green)),
-                                        Text(d['title'] as String,
-                                            style: const TextStyle(
-                                                fontSize: 21,
-                                                fontWeight: FontWeight.bold)),
-                                        const SizedBox(height: 8),
-                                        Text(pickupWindow(d)),
-                                        Text(d['address'] as String),
-                                        const SizedBox(height: 8),
-                                        Wrap(spacing: 12, children: [
-                                          Text(money(d['priceCents']),
-                                              style: const TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 20)),
-                                          Text(money(d['originalPriceCents']),
-                                              style: const TextStyle(
-                                                  decoration: TextDecoration
-                                                      .lineThrough)),
-                                          Text('${d['stock']} left')
-                                        ]),
-                                        if (vendor)
-                                          TextButton.icon(
-                                              onPressed: !widget.approved
-                                                  ? null
-                                                  : () => Navigator.push(
-                                                      context,
-                                                      MaterialPageRoute(
-                                                          builder: (_) =>
-                                                              PublishScreen(
-                                                                  service: widget
-                                                                      .service,
-                                                                  listingId:
-                                                                      doc.id,
-                                                                  initial: d))),
-                                              icon: const Icon(
-                                                  Icons.edit_outlined),
-                                              label:
-                                                  const Text('Edit listing')),
-                                        if (vendor)
-                                          TextButton(
-                                              onPressed: pending
-                                                      .contains(doc.id)
-                                                  ? null
-                                                  : () async {
-                                                      setState(() =>
-                                                          pending.add(doc.id));
-                                                      try {
-                                                        await widget.service.call(
-                                                            'setListingActive',
-                                                            {
-                                                              'listingId':
-                                                                  doc.id,
-                                                              'active':
-                                                                  d['active'] !=
-                                                                      true
-                                                            });
-                                                      } catch (e) {
-                                                        if (context.mounted) {
-                                                          ScaffoldMessenger.of(
-                                                                  context)
-                                                              .showSnackBar(SnackBar(
-                                                                  content: Text(
-                                                                      firebaseMessage(
-                                                                          e))));
-                                                        }
-                                                      } finally {
-                                                        if (mounted) {
-                                                          setState(() => pending
-                                                              .remove(doc.id));
-                                                        }
-                                                      }
-                                                    },
-                                              child: Text(d['active'] == true
-                                                  ? 'Pause listing'
-                                                  : 'Reopen listing')),
-                                      ]))));
-                    });
+                return ListView(padding: const EdgeInsets.all(16), children: [
+                  const Text("Today's rescue deals",
+                      style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: studentDark)),
+                  const SizedBox(height: 14),
+                  ...results.map((doc) {
+                    final d = doc.data();
+                    return StudentDealTile(
+                        title: d['title'] as String,
+                        photoWidget: ListingFoodPhoto(
+                            service: widget.service, listing: d),
+                        price: money(d['priceCents']),
+                        original: money(d['originalPriceCents']),
+                        subtitle:
+                            '${d['stock']} left · ${d['vendorName']} · Pickup ${friendlyPickupWindow(d)}',
+                        emoji: d['category'] == 'Meals'
+                            ? '🍱'
+                            : d['category'] == 'Pastries'
+                                ? '🧁'
+                                : '🥐',
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => ReservationScreen(
+                                    service: widget.service,
+                                    listingId: doc.id))));
+                  }),
+                ]);
               })),
     ]);
   }
@@ -903,17 +974,65 @@ class ReservationScreen extends StatefulWidget {
   State<ReservationScreen> createState() => _ReservationScreenState();
 }
 
+class _VendorAvailability extends StatefulWidget {
+  const _VendorAvailability(
+      {required this.service, required this.vendorId, required this.child});
+  final FoodieService service;
+  final String vendorId;
+  final Widget child;
+  @override
+  State<_VendorAvailability> createState() => _VendorAvailabilityState();
+}
+
+class _VendorAvailabilityState extends State<_VendorAvailability> {
+  late final approval = widget.service.db
+      .collection('vendorBusinesses')
+      .where('approved', isEqualTo: true)
+      .where(FieldPath.documentId, isEqualTo: widget.vendorId)
+      .snapshots();
+  @override
+  Widget build(BuildContext context) =>
+      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: approval,
+          builder: (context, state) {
+            if (state.hasError) {
+              return _Failure(message: firebaseMessage(state.error!));
+            }
+            if (!state.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (!state.data!.docs.any(
+                (doc) => ShopMapPin.fromData(doc.id, doc.data()) != null)) {
+              return StudentEmptyState(
+                  title: 'This vendor is currently unavailable',
+                  message:
+                      'New reservations are paused. Your existing reservations are still in Orders.',
+                  actionLabel: 'Back to food',
+                  onAction: () {
+                    Navigator.maybePop(context);
+                  });
+            }
+            return widget.child;
+          });
+}
+
 class _ReservationScreenState extends State<ReservationScreen> {
   late final stream = widget.service.db
       .collection('listings')
       .doc(widget.listingId)
+      .snapshots();
+  late final allowanceStream = widget.service.db
+      .collection('listings')
+      .doc(widget.listingId)
+      .collection('claims')
+      .doc(widget.service.auth.currentUser!.uid)
       .snapshots();
   int quantity = 1;
   bool busy = false;
   String? error;
   late String requestId = widget.service.requestId();
   int? attemptedQuantity;
-  Future<void> reserve() async {
+  Future<void> reserve(Map<String, dynamic> reviewed) async {
     if (attemptedQuantity != null && attemptedQuantity != quantity) {
       requestId = widget.service.requestId();
     }
@@ -926,27 +1045,35 @@ class _ReservationScreenState extends State<ReservationScreen> {
       final result = await widget.service.call('reserveListing', {
         'listingId': widget.listingId,
         'quantity': quantity,
-        'requestId': requestId
+        'requestId': requestId,
+        'expectedPriceCents': reviewed['priceCents'],
       });
       if (!mounted) return;
-      await showDialog<void>(
-          context: context,
-          barrierDismissible: false,
-          builder: (c) => AlertDialog(
-                  title: const Text('Pickup reserved'),
-                  content: Text(
-                      'Your code: ${result['code']}\n\nFind the code, pickup time and address in My Pickups. No payment was processed.'),
-                  actions: [
-                    TextButton(
-                        onPressed: () => Navigator.pop(c),
-                        child: const Text('Done'))
-                  ]));
-      if (mounted) Navigator.pop(context);
+      Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
+          builder: (_) => OrderDetailsScreen(
+              service: widget.service,
+              reservationId: result['id'] as String,
+              confirmed: true)));
     } catch (e) {
-      if (mounted) setState(() => error = firebaseMessage(e));
+      if (mounted) {
+        setState(() => error = e is FirebaseException &&
+                e.code == 'permission-denied'
+            ? 'This deal is no longer available. Existing reservations are still in Orders.'
+            : firebaseMessage(e));
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
+  }
+
+  Future<void> review(Map<String, dynamic> listing) async {
+    final confirmed = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) =>
+            ReservationReview(listing: listing, quantity: quantity));
+    if (confirmed == true && mounted) await reserve(listing);
   }
 
   @override
@@ -956,6 +1083,15 @@ class _ReservationScreenState extends State<ReservationScreen> {
           stream: stream,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
+              if (snapshot.error
+                  case FirebaseException(code: 'permission-denied')) {
+                return StudentEmptyState(
+                    title: 'Listing unavailable',
+                    message:
+                        'This deal is no longer available to reserve. You can still manage existing reservations in Orders.',
+                    actionLabel: 'Back to browse',
+                    onAction: () => Navigator.maybePop(context));
+              }
               return _Failure(message: firebaseMessage(snapshot.error!));
             }
             if (!snapshot.hasData) {
@@ -969,69 +1105,145 @@ class _ReservationScreenState extends State<ReservationScreen> {
             final available = d['active'] == true &&
                 (d['stock'] as int) >= quantity &&
                 (d['pickupEnd'] as int) > DateTime.now().millisecondsSinceEpoch;
-            return SafeArea(
-                child: ListView(padding: const EdgeInsets.all(24), children: [
-              Text(d['title'] as String,
-                  style: const TextStyle(
-                      fontSize: 30,
-                      fontWeight: FontWeight.bold,
-                      color: _green)),
-              Text(d['vendorName'] as String),
-              const SizedBox(height: 20),
-              Text(money(d['priceCents']),
-                  style: const TextStyle(
-                      fontSize: 28, fontWeight: FontWeight.bold)),
-              Text('Original ${money(d['originalPriceCents'])}',
-                  style:
-                      const TextStyle(decoration: TextDecoration.lineThrough)),
-              const SizedBox(height: 20),
-              Text(d['description'] as String),
-              const SizedBox(height: 20),
-              const Text('Pickup',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              Text(pickupWindow(d)),
-              Text(d['address'] as String),
-              const SizedBox(height: 20),
-              const Text('Dietary & allergen information',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              Text(d['dietary'] as String),
-              const SizedBox(height: 20),
-              Text('${d['stock']} available'),
-              Row(children: [
-                const Text('Quantity'),
-                const Spacer(),
-                IconButton(
-                    onPressed: busy || quantity <= 1
-                        ? null
-                        : () => setState(() => quantity--),
-                    icon: const Icon(Icons.remove_circle_outline)),
-                Text('$quantity'),
-                IconButton(
-                    onPressed: busy ||
-                            quantity >= (d['stock'] as int) ||
-                            quantity >= maxPerCustomer
-                        ? null
-                        : () => setState(() => quantity++),
-                    icon: const Icon(Icons.add_circle_outline))
-              ]),
-              const SizedBox(height: 12),
-              const Text(
-                  'Reserve up to 5 items per listing across your orders. You can cancel before the pickup window ends. Pay at pickup.'),
-              if (error != null)
-                Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    child: Text(error!,
-                        style: TextStyle(
-                            color: Theme.of(context).colorScheme.error))),
-              const SizedBox(height: 16),
-              FilledButton(
-                  onPressed: busy || !available ? null : reserve,
-                  child: Text(busy
-                      ? 'Reserving…'
-                      : available
-                          ? 'Reserve · ${money((d['priceCents'] as int) * quantity)}'
-                          : 'Unavailable')),
-            ]));
+            return _VendorAvailability(
+                service: widget.service,
+                vendorId: d['vendorId'] as String,
+                child: SafeArea(
+                    child:
+                        ListView(padding: const EdgeInsets.all(24), children: [
+                  ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: SizedBox(
+                          height: 210,
+                          child: ListingFoodPhoto(
+                              service: widget.service, listing: d))),
+                  const SizedBox(height: 20),
+                  Text(d['title'] as String,
+                      style: const TextStyle(
+                          fontSize: 30,
+                          fontWeight: FontWeight.bold,
+                          color: _green)),
+                  Text(d['vendorName'] as String),
+                  const SizedBox(height: 20),
+                  Text(money(d['priceCents']),
+                      style: const TextStyle(
+                          fontSize: 28, fontWeight: FontWeight.bold)),
+                  Text('Original ${money(d['originalPriceCents'])}',
+                      style: const TextStyle(
+                          decoration: TextDecoration.lineThrough)),
+                  const SizedBox(height: 20),
+                  Text(d['description'] as String),
+                  if ((d['foodDescription'] as String? ?? '').trim().isNotEmpty)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text(d['foodDescription'] as String)),
+                  const SizedBox(height: 20),
+                  const Text('Pickup',
+                      style:
+                          TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  Text(friendlyPickupWindow(d)),
+                  Text(d['address'] as String),
+                  if ((d['pickupInstructions'] as String? ?? '')
+                      .trim()
+                      .isNotEmpty)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(d['pickupInstructions'] as String)),
+                  DirectionsButton(
+                      address: d['address'] as String,
+                      latitude: (d['latitude'] as num?)?.toDouble(),
+                      longitude: (d['longitude'] as num?)?.toDouble()),
+                  const SizedBox(height: 20),
+                  const Text('Dietary & allergen information',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  if (d.containsKey('ingredients') ||
+                      d.containsKey('allergens') ||
+                      d.containsKey('halalStatus')) ...[
+                    if ((d['ingredients'] as String? ?? '').trim().isNotEmpty)
+                      Text('Ingredients: ${d['ingredients']}'),
+                    Text((d['allergens'] as String? ?? '').trim().isEmpty
+                        ? 'Allergens not declared. Ask the vendor before consuming.'
+                        : 'Allergens: ${d['allergens']}'),
+                    if ((d['dietaryTags'] as List? ?? []).isNotEmpty)
+                      Text(
+                          'Vendor declares: ${(d['dietaryTags'] as List).join(', ')}'),
+                    Text(d['halalStatus'] == 'vendor_declared'
+                        ? 'Halal: vendor declared; certification not verified.'
+                        : 'Halal status not declared.'),
+                  ] else
+                    Text(d['dietary'] as String),
+                  const SizedBox(height: 20),
+                  StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      stream: allowanceStream,
+                      builder: (context, claim) {
+                        if (claim.hasError) {
+                          return const Text(
+                              'Unable to check your reservation allowance. Reopen this listing to retry.');
+                        }
+                        if (!claim.hasData) {
+                          return const Center(
+                              child: CircularProgressIndicator());
+                        }
+                        final remaining = remainingReservationAllowance(
+                            (claim.data!.data()?['quantity'] as int?) ?? 0,
+                            limit: maxPerCustomer);
+                        return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text('${d['stock']} available'),
+                              Row(children: [
+                                const Text('Quantity'),
+                                const Spacer(),
+                                IconButton(
+                                    onPressed: busy || quantity <= 1
+                                        ? null
+                                        : () => setState(() => quantity--),
+                                    icon: const Icon(
+                                        Icons.remove_circle_outline)),
+                                Text('$quantity'),
+                                IconButton(
+                                    onPressed: busy ||
+                                            quantity >= (d['stock'] as int) ||
+                                            quantity >= remaining
+                                        ? null
+                                        : () => setState(() => quantity++),
+                                    icon: const Icon(Icons.add_circle_outline))
+                              ]),
+                              const SizedBox(height: 12),
+                              Text(remaining == 0
+                                  ? 'You have reached the 5-item limit for this listing. Cancel an eligible order to free your allowance.'
+                                  : 'You can reserve $remaining more ${remaining == 1 ? 'item' : 'items'} from this listing.'),
+                              if (quantity > remaining && remaining > 0)
+                                const Text(
+                                    'Reduce the quantity to fit your remaining allowance.'),
+                              const SizedBox(height: 8),
+                              const Text(
+                                  'Reserve up to 5 items per listing across your orders. You can cancel before the pickup window ends. Pay at pickup.'),
+                              if (error != null)
+                                Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 16),
+                                    child: Text(error!,
+                                        style: TextStyle(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .error))),
+                              const SizedBox(height: 16),
+                              FilledButton(
+                                  onPressed:
+                                      busy || !available || quantity > remaining
+                                          ? null
+                                          : () => review(d),
+                                  child: Text(busy
+                                      ? 'Reserving…'
+                                      : available && quantity <= remaining
+                                          ? 'Reserve · ${money((d['priceCents'] as int) * quantity)}'
+                                          : remaining == 0
+                                              ? 'Limit reached'
+                                              : 'Unavailable')),
+                            ]);
+                      }),
+                ])));
           }));
 }
 
@@ -1041,7 +1253,9 @@ class CloudPickups extends StatefulWidget {
       required this.service,
       required this.uid,
       required this.role,
-      required this.approved});
+      required this.approved,
+      this.onBrowse});
+  final VoidCallback? onBrowse;
   final FoodieService service;
   final String uid, role;
   final bool approved;
@@ -1052,14 +1266,26 @@ class CloudPickups extends StatefulWidget {
 class _CloudPickupsState extends State<CloudPickups> {
   late final stream = widget.service.reservations(widget.role, widget.uid);
   final code = TextEditingController();
+  String statusTab = 'reserved';
   bool busy = false;
+  Timer? ticker;
+  @override
+  void initState() {
+    super.initState();
+    ticker = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
   @override
   void dispose() {
+    ticker?.cancel();
     code.dispose();
     super.dispose();
   }
 
   Future<void> collect() async {
+    if (busy) return;
     setState(() => busy = true);
     try {
       await widget.service
@@ -1077,6 +1303,34 @@ class _CloudPickupsState extends State<CloudPickups> {
     } finally {
       if (mounted) setState(() => busy = false);
     }
+  }
+
+  Future<void> collectOrder(Map<String, dynamic> order) async {
+    final yes = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+                title: const Text('Confirm food handover?'),
+                content: Text(
+                    'Mark ${order['quantity']} × ${order['title']} as collected? Only confirm after handing over the food.'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(c, false),
+                      child: const Text('Go back')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(c, true),
+                      child: const Text('Confirm collection'))
+                ]));
+    if (yes != true || !mounted) return;
+    code.text = order['code'] as String;
+    await collect();
+  }
+
+  Future<void> scan() async {
+    final scanned = await Navigator.push<String>(context,
+        MaterialPageRoute(builder: (_) => const PickupScannerScreen()));
+    if (!mounted || scanned == null) return;
+    code.text = scanned;
+    await collect();
   }
 
   Future<void> cancel(String reservationId) async {
@@ -1110,33 +1364,119 @@ class _CloudPickupsState extends State<CloudPickups> {
     }
   }
 
+  Future<void> changeStatus(String id, String status) async {
+    if (busy) return;
+    setState(() => busy = true);
+    try {
+      if (status == 'noshow') {
+        final yes = await showDialog<bool>(
+            context: context,
+            builder: (dialog) => AlertDialog(
+                    title: const Text('Mark as not collected?'),
+                    content: const Text(
+                        'The pickup time has ended. This closes the reservation without returning stock. Choose Cancel reservation instead if you want to return the reserved quantity.'),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(dialog, false),
+                          child: const Text('Go back')),
+                      FilledButton(
+                          onPressed: () => Navigator.pop(dialog, true),
+                          child: const Text('Not collected')),
+                    ]));
+        if (yes != true || !mounted) return;
+      }
+      await widget.service.call(
+          status == 'ready' ? 'markOrderReady' : 'markOrderNoShow',
+          {'reservationId': id});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(status == 'ready'
+                ? 'Food marked ready. The customer can see the update in Orders.'
+                : 'Reservation marked as not collected.')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(firebaseMessage(error))));
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Column(children: [
         if (widget.role == 'vendor')
           Padding(
               padding: const EdgeInsets.all(16),
               child: Column(children: [
+                SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                        onPressed: busy || !widget.approved ? null : scan,
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('Scan pickup QR'))),
+                const SizedBox(height: 12),
                 TextField(
                     controller: code,
                     enabled: !busy && widget.approved,
                     textCapitalization: TextCapitalization.characters,
                     decoration: const InputDecoration(
-                        labelText: 'Customer pickup code')),
+                        labelText:
+                            '4-digit pickup code or reservation reference',
+                        helperText: 'Older FN-… references still work.',
+                        helperMaxLines: 2)),
                 const SizedBox(height: 8),
                 FilledButton(
                     onPressed: busy || !widget.approved ? null : collect,
-                    child: Text(busy ? 'Verifying…' : 'Confirm collection')),
+                    child: Text(busy ? 'Please wait…' : 'Confirm collection')),
               ])),
+        OrderStatusTabs(
+            upcomingLabel: widget.role == 'vendor' ? 'Pending' : 'Upcoming',
+            selected: statusTab,
+            onSelected: (value) => setState(() => statusTab = value)),
         Expanded(
             child: Records(
                 stream: stream,
                 empty: 'No reservations yet.',
+                emptyView: widget.role == 'customer'
+                    ? StudentEmptyState(
+                        title: 'No orders yet',
+                        message:
+                            'Find a deal nearby and reserve your first pickup.',
+                        actionLabel: 'Browse food',
+                        onAction: widget.onBrowse)
+                    : null,
                 builder: (docs) {
-                  docs.sort((a, b) => (b.data()['pickupStart'] as int)
-                      .compareTo(a.data()['pickupStart'] as int));
+                  final visible = docs
+                      .where(
+                          (doc) => reservationMatchesTab(doc.data(), statusTab))
+                      .toList();
+                  visible.sort((a, b) => statusTab == 'reserved'
+                      ? (a.data()['pickupStart'] as int)
+                          .compareTo(b.data()['pickupStart'] as int)
+                      : (b.data()['pickupStart'] as int)
+                          .compareTo(a.data()['pickupStart'] as int));
+                  if (visible.isEmpty) {
+                    return StudentEmptyState(
+                        title: statusTab == 'reserved'
+                            ? 'No upcoming pickups'
+                            : statusTab == 'collected'
+                                ? 'No collected orders'
+                                : statusTab == 'noshow'
+                                    ? 'No uncollected orders'
+                                    : 'No cancelled orders',
+                        message: statusTab == 'reserved'
+                            ? 'Your next reservation and pickup QR will appear here.'
+                            : 'Orders will appear here when their status changes.',
+                        actionLabel:
+                            statusTab == 'reserved' ? 'Browse food' : null,
+                        onAction:
+                            statusTab == 'reserved' ? widget.onBrowse : null);
+                  }
                   return ListView(
                       padding: const EdgeInsets.all(16),
-                      children: docs.map((doc) {
+                      children: visible.map((doc) {
                         final d = doc.data();
                         return Card(
                             child: Padding(
@@ -1146,7 +1486,8 @@ class _CloudPickupsState extends State<CloudPickups> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                          (d['status'] as String).toUpperCase(),
+                                          reservationStatusLabel(
+                                              d['status'] as String),
                                           style: const TextStyle(
                                               color: _green,
                                               fontWeight: FontWeight.bold)),
@@ -1156,12 +1497,41 @@ class _CloudPickupsState extends State<CloudPickups> {
                                               fontSize: 22,
                                               fontWeight: FontWeight.bold)),
                                       Text(d['vendorName'] as String),
-                                      Text(pickupWindow(d)),
+                                      if (widget.role == 'customer' &&
+                                          isOpenReservation(d) &&
+                                          shortPickupCode(d) != null)
+                                        Text(
+                                            'Pickup code: ${shortPickupCode(d)}',
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.w700)),
+                                      Text(widget.role == 'customer'
+                                          ? friendlyPickupWindow(d)
+                                          : pickupWindow(d)),
+                                      if (widget.role == 'customer' &&
+                                          isOpenReservation(d) &&
+                                          (d['pickupEnd'] as int) <
+                                              DateTime.now()
+                                                  .millisecondsSinceEpoch)
+                                        const Text(
+                                            'Pickup window ended — contact the vendor.',
+                                            style: TextStyle(
+                                                color: Colors.deepOrange)),
                                       Text(d['address'] as String),
                                       const SizedBox(height: 12),
                                       Text(
                                           'Qty ${d['quantity']} · ${money(d['totalCents'])} · Unpaid'),
-                                      if (d['status'] == 'reserved' &&
+                                      if (widget.role == 'vendor' &&
+                                          isOpenReservation(d))
+                                        VendorPickupActions(
+                                            order: d,
+                                            busy: busy,
+                                            approved: widget.approved,
+                                            onReady: () =>
+                                                changeStatus(doc.id, 'ready'),
+                                            onNoShow: () =>
+                                                changeStatus(doc.id, 'noshow'),
+                                            onCollect: () => collectOrder(d)),
+                                      if (isOpenReservation(d) &&
                                           ((widget.role == 'vendor' &&
                                                   widget.approved) ||
                                               (widget.role == 'customer' &&
@@ -1178,341 +1548,27 @@ class _CloudPickupsState extends State<CloudPickups> {
                                                 'Cancel reservation')),
                                       if (widget.role == 'customer') ...[
                                         const Divider(height: 24),
-                                        SelectableText(d['code'] as String,
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 19)),
-                                        const Text(
-                                            'Show this code to your vendor when collecting.')
+                                        FilledButton.tonalIcon(
+                                            onPressed: () => Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                    builder: (_) =>
+                                                        OrderDetailsScreen(
+                                                            service:
+                                                                widget.service,
+                                                            reservationId:
+                                                                doc.id))),
+                                            icon: Icon(isOpenReservation(d)
+                                                ? Icons.qr_code
+                                                : Icons.receipt_long_outlined),
+                                            label: Text(isOpenReservation(d)
+                                                ? 'View pickup QR'
+                                                : 'View order')),
                                       ],
                                     ])));
                       }).toList());
                 })),
       ]);
-}
-
-class VendorApprovals extends StatefulWidget {
-  const VendorApprovals({super.key, required this.service});
-  final FoodieService service;
-  @override
-  State<VendorApprovals> createState() => _VendorApprovalsState();
-}
-
-class _VendorApprovalsState extends State<VendorApprovals> {
-  late final stream = widget.service.db
-      .collection('users')
-      .where('role', isEqualTo: 'vendor')
-      .snapshots();
-  final pending = <String>{};
-  @override
-  Widget build(BuildContext context) => Records(
-      stream: stream,
-      empty: 'No vendor applications yet.',
-      builder: (docs) => ListView(padding: const EdgeInsets.all(16), children: [
-            const Text('Vendor applications',
-                style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            ...docs.map((doc) {
-              final d = doc.data();
-              return Card(
-                  child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(d['name'] as String,
-                                style: const TextStyle(
-                                    fontSize: 20, fontWeight: FontWeight.bold)),
-                            Text(d['approved'] == true
-                                ? 'Approved'
-                                : 'Pending approval'),
-                            if (d['approved'] != true)
-                              FilledButton(
-                                  onPressed: pending.contains(doc.id)
-                                      ? null
-                                      : () async {
-                                          setState(() => pending.add(doc.id));
-                                          try {
-                                            await widget.service
-                                                .approveVendor(doc.id);
-                                          } catch (e) {
-                                            if (context.mounted) {
-                                              ScaffoldMessenger.of(context)
-                                                  .showSnackBar(SnackBar(
-                                                      content: Text(
-                                                          firebaseMessage(e))));
-                                            }
-                                          } finally {
-                                            if (mounted) {
-                                              setState(
-                                                  () => pending.remove(doc.id));
-                                            }
-                                          }
-                                        },
-                                  child: const Text('Approve vendor')),
-                          ])));
-            }),
-          ]));
-}
-
-class PublishScreen extends StatefulWidget {
-  const PublishScreen(
-      {super.key, required this.service, this.listingId, this.initial});
-  final FoodieService service;
-  final String? listingId;
-  final Map<String, dynamic>? initial;
-  @override
-  State<PublishScreen> createState() => _PublishScreenState();
-}
-
-class _PublishScreenState extends State<PublishScreen> {
-  final form = GlobalKey<FormState>();
-  final title = TextEditingController(),
-      description = TextEditingController(),
-      address = TextEditingController(),
-      dietary = TextEditingController(),
-      price = TextEditingController(),
-      original = TextEditingController(),
-      stock = TextEditingController();
-  String category = 'Meals';
-  DateTime? start, end;
-  bool busy = false;
-  String? error;
-  @override
-  void dispose() {
-    for (final c in [
-      title,
-      description,
-      address,
-      dietary,
-      price,
-      original,
-      stock
-    ]) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    final d = widget.initial;
-    if (d == null) return;
-    title.text = d['title'] as String;
-    description.text = d['description'] as String;
-    address.text = d['address'] as String;
-    dietary.text = d['dietary'] as String;
-    price.text = ((d['priceCents'] as int) / 100).toStringAsFixed(2);
-    original.text = ((d['originalPriceCents'] as int) / 100).toStringAsFixed(2);
-    stock.text = '${d['stock']}';
-    category = d['category'] as String;
-    start = DateTime.fromMillisecondsSinceEpoch(d['pickupStart'] as int);
-    end = DateTime.fromMillisecondsSinceEpoch(d['pickupEnd'] as int);
-  }
-
-  int? cents(String text) {
-    if (!RegExp(r'^\d+(\.\d{1,2})?$').hasMatch(text.trim())) return null;
-    final value = double.tryParse(text.trim());
-    if (value == null || !value.isFinite) return null;
-    return (value * 100).round();
-  }
-
-  Future<void> pick(bool first) async {
-    final now = DateTime.now();
-    final day = await showDatePicker(
-        context: context,
-        initialDate: (first ? start ?? now : end ?? start ?? now).isBefore(now)
-            ? now
-            : (first ? start ?? now : end ?? start ?? now),
-        firstDate: DateTime(now.year, now.month, now.day),
-        lastDate: now.add(const Duration(days: 30)));
-    if (day == null || !mounted) return;
-    final time = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay.fromDateTime(first
-            ? start ?? now.add(const Duration(hours: 1))
-            : end ?? now.add(const Duration(hours: 2))));
-    if (time == null || !mounted) return;
-    setState(() {
-      final value =
-          DateTime(day.year, day.month, day.day, time.hour, time.minute);
-      if (first) {
-        start = value;
-      } else {
-        end = value;
-      }
-    });
-  }
-
-  Future<void> publish() async {
-    if (!form.currentState!.validate()) return;
-    final now = DateTime.now();
-    if (start == null ||
-        end == null ||
-        (widget.listingId == null &&
-            start!.isBefore(now.subtract(const Duration(minutes: 5)))) ||
-        !end!.isAfter(start!) ||
-        !end!.isAfter(now)) {
-      setState(() => error =
-          'Choose an open or upcoming pickup window with a later end time.');
-      return;
-    }
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      await widget.service
-          .call(widget.listingId == null ? 'publishListing' : 'editListing', {
-        if (widget.listingId != null) 'listingId': widget.listingId,
-        'title': title.text.trim(),
-        'description': description.text.trim(),
-        'address': address.text.trim(),
-        'dietary': dietary.text.trim(),
-        'category': category,
-        'priceCents': cents(price.text),
-        'originalPriceCents': cents(original.text),
-        if (widget.initial == null ||
-            int.parse(stock.text) != widget.initial!['stock'])
-          'stock': int.parse(stock.text),
-        'pickupStart': start!.millisecondsSinceEpoch,
-        'pickupEnd': end!.millisecondsSinceEpoch
-      });
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      if (mounted) setState(() => error = firebaseMessage(e));
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  Widget field(TextEditingController controller, String label, int max,
-          {int lines = 1}) =>
-      Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: TextFormField(
-              controller: controller,
-              enabled: !busy,
-              maxLength: max,
-              maxLines: lines,
-              decoration: InputDecoration(labelText: label),
-              validator: (v) => v == null || v.trim().isEmpty
-                  ? 'This field is required.'
-                  : null));
-  @override
-  Widget build(BuildContext context) => Scaffold(
-      backgroundColor: managementCream,
-      appBar: AppBar(
-          title: const Text('FoodieNoms'),
-          backgroundColor: managementGreen,
-          foregroundColor: Colors.white),
-      body: Theme(
-          data: Theme.of(context).copyWith(
-              inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: Color(0xFFD0DFD3))),
-            enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: Color(0xFFD0DFD3))),
-          )),
-          child: SafeArea(
-              child: Form(
-                  key: form,
-                  child: ListView(padding: const EdgeInsets.all(20), children: [
-                    Text(
-                        widget.listingId == null
-                            ? 'Create surplus listing'
-                            : 'Edit food listing',
-                        style: TextStyle(
-                            fontSize: 25,
-                            fontWeight: FontWeight.w800,
-                            color: managementInk)),
-                    const SizedBox(height: 24),
-                    field(title, 'Food name', 100),
-                    field(description, 'What is included?', 1000, lines: 3),
-                    DropdownButtonFormField<String>(
-                        initialValue: category,
-                        decoration:
-                            const InputDecoration(labelText: 'Category'),
-                        items: ['Bakery', 'Meals', 'Pastries', 'Other']
-                            .map((v) =>
-                                DropdownMenuItem(value: v, child: Text(v)))
-                            .toList(),
-                        onChanged:
-                            busy ? null : (v) => setState(() => category = v!)),
-                    const SizedBox(height: 16),
-                    field(address, 'Full pickup address', 300, lines: 2),
-                    field(dietary,
-                        'Ingredients, allergens and dietary information', 500,
-                        lines: 3),
-                    ...[
-                      (price, 'Discounted price (RM)'),
-                      (original, 'Original price (RM)')
-                    ].map((pair) => Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: TextFormField(
-                            controller: pair.$1,
-                            enabled: !busy,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            decoration: InputDecoration(labelText: pair.$2),
-                            validator: (v) {
-                              final amount = cents(v ?? '');
-                              if (amount == null ||
-                                  amount < 1 ||
-                                  amount > 1000000) {
-                                return 'Enter RM 0.01 to RM 10,000.00 (up to 2 decimals).';
-                              }
-                              if (pair.$1 == original &&
-                                  amount < (cents(price.text) ?? 0)) {
-                                return 'Original price must be at least the discounted price.';
-                              }
-                              return null;
-                            }))),
-                    TextFormField(
-                        controller: stock,
-                        enabled: !busy,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                            labelText: 'Available quantity'),
-                        validator: (v) {
-                          final value = int.tryParse(v ?? '');
-                          return value == null ||
-                                  value < (widget.listingId == null ? 1 : 0) ||
-                                  value > 10000
-                              ? 'Enter a quantity from ${widget.listingId == null ? 1 : 0} to 10,000.'
-                              : null;
-                        }),
-                    const SizedBox(height: 16),
-                    OutlinedButton(
-                        onPressed: busy ? null : () => pick(true),
-                        child: Text(start == null
-                            ? 'Choose pickup start'
-                            : 'Start: ${start!.toLocal()}')),
-                    OutlinedButton(
-                        onPressed: busy ? null : () => pick(false),
-                        child: Text(end == null
-                            ? 'Choose pickup end'
-                            : 'End: ${end!.toLocal()}')),
-                    if (error != null)
-                      Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          child: Text(error!,
-                              style: TextStyle(
-                                  color: Theme.of(context).colorScheme.error))),
-                    const SizedBox(height: 16),
-                    FilledButton(
-                        onPressed: busy ? null : publish,
-                        child: Text(busy
-                            ? 'Saving…'
-                            : widget.listingId == null
-                                ? 'Publish listing'
-                                : 'Save changes')),
-                  ])))));
 }
 
 class _Loading extends StatelessWidget {
@@ -1546,133 +1602,117 @@ class CustomerMap extends StatefulWidget {
 }
 
 class _CustomerMapState extends State<CustomerMap> {
-  late final stream = widget.service.listings('customer', widget.uid);
+  late final listings = widget.service.listings('customer', widget.uid);
+  late final businesses = widget.service.db
+      .collection('vendorBusinesses')
+      .where('approved', isEqualTo: true)
+      .snapshots();
+  ShopMapPin? focused;
+
+  void showShop(ShopMapPin pin) {
+    setState(() => focused = pin);
+    showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        backgroundColor: studentCream,
+        builder: (sheet) => SafeArea(
+            child: FractionallySizedBox(
+                heightFactor: .68,
+                child: ListView(padding: const EdgeInsets.all(22), children: [
+                  Text(pin.name,
+                      style: const TextStyle(
+                          fontSize: 25,
+                          fontWeight: FontWeight.w800,
+                          color: studentDark)),
+                  const SizedBox(height: 8),
+                  Text(pin.address),
+                  DirectionsButton(
+                      address: pin.address,
+                      latitude: pin.latitude,
+                      longitude: pin.longitude),
+                  const SizedBox(height: 18),
+                  const Text('Available food',
+                      style:
+                          TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                  ApprovedVendorRecords(
+                      service: widget.service,
+                      stream: listings,
+                      empty: 'No food available at this shop right now.',
+                      builder: (docs) {
+                        final available = docs.where((doc) {
+                          final data = doc.data();
+                          return data['vendorId'] == pin.id &&
+                              (data['stock'] as int) > 0 &&
+                              (data['pickupEnd'] as int) >
+                                  DateTime.now().millisecondsSinceEpoch;
+                        }).toList();
+                        if (available.isEmpty) {
+                          return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 18),
+                              child: Text(
+                                  'No food available at this shop right now.'));
+                        }
+                        return Column(
+                            children: available.map((doc) {
+                          final data = doc.data();
+                          return Card(
+                              child: ListTile(
+                                  title: Text(data['title'] as String),
+                                  subtitle: Text(
+                                      '${money(data['priceCents'])} · ${data['stock']} left\n${friendlyPickupWindow(data)}'),
+                                  isThreeLine: true,
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: () {
+                                    Navigator.pop(sheet);
+                                    Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                            builder: (_) => ReservationScreen(
+                                                service: widget.service,
+                                                listingId: doc.id)));
+                                  }));
+                        }).toList());
+                      }),
+                ]))));
+  }
+
   @override
   Widget build(BuildContext context) =>
-      ListView(padding: const EdgeInsets.all(22), children: [
-        const Text('Deals near you',
-            style: TextStyle(
-                fontSize: 27, fontWeight: FontWeight.w800, color: studentDark)),
-        const SizedBox(height: 12),
-        Row(children: [
-          const Icon(Icons.location_on_outlined, color: studentGreen, size: 18),
-          const SizedBox(width: 6),
-          Expanded(
-              child: AnimatedBuilder(
-                  animation: widget.location,
-                  builder: (_, __) => Text(widget.location.area))),
-          TextButton(
-              onPressed: () => openLocation(context, widget.location),
-              child: const Text('Change'))
-        ]),
-        const SizedBox(height: 12),
-        LiveLocationMap(location: widget.location),
-        const SizedBox(height: 8),
-        const Text(
-            'Use the location button to show where you are. Vendor addresses are listed below; vendor pins are not available yet.',
-            style: TextStyle(fontSize: 11, color: Colors.black54)),
-        const SizedBox(height: 20),
-        Records(
-            stream: stream,
-            empty: 'No food available yet.',
-            emptyView: Column(children: [
-              const Padding(
-                  padding: EdgeInsets.only(bottom: 12),
-                  child: Text('Sample vendors · preview only',
-                      style: TextStyle(color: Colors.black54))),
-              ...sampleFoods.map((food) => StudentDealTile(
-                  title: food.name,
-                  price: food.formattedPrice,
-                  original: food.formattedOriginal,
-                  subtitle: food.vendor,
-                  emoji: food.emoji,
-                  preview: true,
-                  onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => SampleFoodDetails(food: food))))),
-            ]),
-            builder: (docs) {
-              final available = docs
-                  .where((doc) =>
-                      (doc.data()['pickupEnd'] as int) >
-                      DateTime.now().millisecondsSinceEpoch)
-                  .toList();
-              if (available.isEmpty) {
-                return const Text(
-                    'No current pickups. Check back for new listings.');
-              }
-              return Column(
-                  children: available.map((doc) {
-                final d = doc.data();
-                return Card(
-                    color: Colors.white,
-                    child: ListTile(
-                        contentPadding: const EdgeInsets.all(16),
-                        title: Text(d['vendorName'] as String),
-                        subtitle: Text(
-                            '${d['title']} · ${money(d['priceCents'])}\n${d['address']}'),
-                        isThreeLine: true,
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => ReservationScreen(
-                                    service: widget.service,
-                                    listingId: doc.id)))));
-              }).toList());
-            }),
-      ]);
+      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: businesses,
+          builder: (context, state) {
+            final shops = <ShopMapPin>[
+              for (final doc in state.data?.docs ?? <CloudDoc>[])
+                if (ShopMapPin.fromData(doc.id, doc.data()) case final pin?)
+                  pin,
+            ]..sort((a, b) => a.name.compareTo(b.name));
+            final currentFocus =
+                shops.where((pin) => pin.id == focused?.id).firstOrNull;
+            return CustomerMapPanel(
+                location: widget.location,
+                shops: shops,
+                focusShop: currentFocus,
+                onShopTap: showShop,
+                onChangeLocation: () => openLocation(context, widget.location),
+                loading: !state.hasData && !state.hasError,
+                error: state.hasError ? firebaseMessage(state.error!) : null);
+          });
 }
 
-class PasswordSettings extends StatefulWidget {
+class PasswordSettings extends StatelessWidget {
   const PasswordSettings(
       {super.key, required this.service, required this.email});
   final FoodieService service;
   final String email;
   @override
-  State<PasswordSettings> createState() => _PasswordSettingsState();
-}
-
-class _PasswordSettingsState extends State<PasswordSettings> {
-  bool busy = false;
-  String? message;
-  Future<void> reset() async {
-    setState(() {
-      busy = true;
-      message = null;
-    });
-    try {
-      await widget.service.auth.sendPasswordResetEmail(email: widget.email);
-      if (mounted) {
-        setState(
-            () => message = 'Password reset email sent. Check your inbox.');
-      }
-    } catch (e) {
-      if (mounted) setState(() => message = firebaseMessage(e));
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) =>
-      ListView(padding: const EdgeInsets.all(24), children: [
-        const Text('Password & security',
-            style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 16),
-        Text(widget.email),
-        const SizedBox(height: 20),
-        const Text(
-            'Reset your password using the link sent to your registered email address.'),
-        const SizedBox(height: 20),
-        FilledButton(
-            onPressed: busy || widget.email.isEmpty ? null : reset,
-            child: Text(busy ? 'Sending…' : 'Send reset link')),
-        if (message != null)
-          Padding(
-              padding: const EdgeInsets.only(top: 16), child: Text(message!)),
-      ]);
+  Widget build(BuildContext context) => SafeArea(
+      child: PasswordRecoveryForm(
+          initialEmail: email,
+          emailReadOnly: true,
+          onSend: service.requestPasswordReset,
+          backLabel: 'Back to profile',
+          onBack: () => Navigator.maybePop(context)));
 }
 
 class CustomerNotifications extends StatefulWidget {
@@ -1704,9 +1744,13 @@ class _CustomerNotificationsState extends State<CustomerNotifications> {
                               ? Icons.check_circle_outline
                               : Icons.receipt_long_outlined,
                           color: studentGreen),
-                      title: Text(d['status'] == 'collected'
-                          ? 'Your pickup was collected'
-                          : 'Your reservation is confirmed'),
+                      title: Text(switch (d['status']) {
+                        'ready' => 'Your food is ready for pickup',
+                        'collected' => 'Your pickup was collected',
+                        'cancelled' => 'Your reservation was cancelled',
+                        'noshow' => 'Your pickup was not collected',
+                        _ => 'Your reservation is confirmed',
+                      }),
                       subtitle: Text('${d['title']}\n${pickupWindow(d)}'),
                       isThreeLine: true));
             }),

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "147132151155",
+    "project_id": "foodienoms-42a7d",
+    "storage_bucket": "foodienoms-42a7d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:147132151155:android:d0372bb0ec0cfc0997c106",
+        "android_client_info": {
+          "package_name": "com.foodienoms.foodienoms"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCOm6VPBdna1F-r9-RM2zpudnz69lYek3s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

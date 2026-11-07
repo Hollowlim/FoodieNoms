@@ -11,6 +11,8 @@ const listing = (overrides = {}) => ({title: 'Lunch box', description: 'Rice and
   dietary: 'Contains soy', category: 'Meals', priceCents: 800, originalPriceCents: 1500, stock: 20,
   pickupStart: Date.now() + 10 * MINUTE, pickupEnd: Date.now() + 2 * HOUR, vendorId: 'vendor', vendorName: 'Subang Cafe',
   active: true, createdAt: serverTimestamp(), ...overrides});
+// Keep seeded legacy fixtures locationless; every new publication has a saved pickup point.
+const publishedListing = (overrides = {}) => listing({latitude: 3.075, longitude: 101.59, ...overrides});
 const seed = (path, data) => env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), path), data));
 before(async () => {
   env = await initializeTestEnvironment({projectId: 'demo-foodienoms', firestore: {
@@ -21,6 +23,9 @@ before(async () => {
     ['customer', 'customer', false, 'Customer'], ['other-customer', 'customer', false, 'Other Customer']]) {
     await seed('users/' + uid, {name, role, approved, createdAt: new Date()});
   }
+  await seed('vendorBusinesses/vendor', {vendorId: 'vendor', businessName: 'Subang Cafe',
+    address: '1 Test Street, Subang Jaya', latitude: 3.075, longitude: 101.59,
+    approved: true, configured: true, updatedAt: new Date()});
 });
 after(async () => { await env?.cleanup(); });
 
@@ -54,12 +59,12 @@ test('ended listings cannot be edited unless the window is extended', async () =
 });
 test('listings may name a preset photo and nothing else', async () => {
   const ref = id => doc(client('vendor'), 'listings', id);
-  await assertSucceeds(setDoc(ref('no-photo'), listing()));
-  await assertSucceeds(setDoc(ref('photo'), listing({imageKey: 'photo-2'})));
+  await assertSucceeds(setDoc(ref('no-photo'), publishedListing()));
+  await assertSucceeds(setDoc(ref('photo'), publishedListing({imageKey: 'photo-2'})));
   await assertSucceeds(updateDoc(ref('photo'), {imageKey: 'photo-3'}));
   await assertSucceeds(updateDoc(ref('no-photo'), {imageKey: 'photo-0'}));
   for (const imageKey of ['photo-9', 'https://example.com/a.jpg', '', 3]) {
-    await assertFails(setDoc(ref('bad-photo'), listing({imageKey})));
+    await assertFails(setDoc(ref('bad-photo'), publishedListing({imageKey})));
     await assertFails(updateDoc(ref('photo'), {imageKey}));
   }
 });
@@ -85,6 +90,7 @@ let nextCode = 0;
 const code = () => 'FN-' + (++nextCode).toString(16).toUpperCase().padStart(20, 'A');
 const orderFor = (uid, listingId, deal, id, quantity) => ({customerId: uid, vendorId: deal.vendorId, listingId, title: deal.title,
   vendorName: deal.vendorName, address: deal.address, pickupStart: deal.pickupStart, pickupEnd: deal.pickupEnd, quantity,
+  ...('latitude' in deal ? {latitude: deal.latitude, longitude: deal.longitude} : {}),
   unitPriceCents: deal.priceCents, totalCents: deal.priceCents * quantity, status: 'reserved', code: id,
   paymentStatus: 'unpaid', createdAt: serverTimestamp()});
 function reserve(uid, listingId, quantity, id = code()) {
@@ -227,9 +233,9 @@ test('orders can be cancelled after pausing, and older orders without a claim st
 });
 test('a listing may open for pickup immediately, but not in the past', async () => {
   const ref = id => doc(client('vendor'), 'listings', id);
-  await assertSucceeds(setDoc(ref('open-now'), listing({pickupStart: Date.now() - MINUTE})));
-  await assertFails(setDoc(ref('too-old'), listing({pickupStart: Date.now() - 10 * MINUTE})));
-  await assertFails(setDoc(ref('already-ended'), listing({pickupStart: Date.now() - 2 * MINUTE, pickupEnd: Date.now() - MINUTE})));
+  await assertSucceeds(setDoc(ref('open-now'), publishedListing({pickupStart: Date.now() - MINUTE})));
+  await assertFails(setDoc(ref('too-old'), publishedListing({pickupStart: Date.now() - 10 * MINUTE})));
+  await assertFails(setDoc(ref('already-ended'), publishedListing({pickupStart: Date.now() - 2 * MINUTE, pickupEnd: Date.now() - MINUTE})));
   const id = await reserve('customer', 'open-now', 1);
   await assertSucceeds(updateDoc(doc(client('vendor'), 'reservations', id), collected));
 });

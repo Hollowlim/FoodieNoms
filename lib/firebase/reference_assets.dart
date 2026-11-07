@@ -61,3 +61,83 @@ class BrandLogo extends StatelessWidget {
               fit: BoxFit.contain,
               semanticLabel: 'FoodieNoms logo')));
 }
+
+int listingPhotoIndex(Map<String, dynamic> listing) {
+  final key = listing['imageKey'];
+  if (key is String && RegExp(r'^photo-[0-3]$').hasMatch(key)) {
+    return int.parse(key.substring(6));
+  }
+  return listing['category'] == 'Meals'
+      ? 1
+      : listing['category'] == 'Pastries'
+          ? 2
+          : 0;
+}
+
+class ListingPhotoPicker extends StatelessWidget {
+  const ListingPhotoPicker(
+      {super.key, required this.selected, required this.onSelected});
+  final int selected;
+  final ValueChanged<int> onSelected;
+  static const labels = [
+    'Pastry box',
+    'Rice meal',
+    'Pastry basket',
+    'Bakery counter'
+  ];
+  @override
+  Widget build(BuildContext context) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Photo (optional)',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 6),
+        const Text('Students see this as an illustrative photo.'),
+        const SizedBox(height: 12),
+        GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            childAspectRatio: 1.35,
+            children: [
+              for (var i = 0; i < 4; i++)
+                Semantics(
+                  selected: selected == i,
+                  button: true,
+                  label: labels[i],
+                  child: InkWell(
+                      onTap: () => onSelected(i),
+                      child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                              border: Border.all(
+                                  color: selected == i
+                                      ? const Color(0xFF205F45)
+                                      : Colors.transparent,
+                                  width: 3)),
+                          child: Stack(fit: StackFit.expand, children: [
+                            ReferenceFoodPhoto(index: i),
+                            Positioned(
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                child: ColoredBox(
+                                    color: Colors.black54,
+                                    child: Padding(
+                                        padding: const EdgeInsets.all(4),
+                                        child: Text(labels[i],
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12))))),
+                            if (selected == i)
+                              const Positioned(
+                                  top: 4,
+                                  right: 4,
+                                  child: Icon(Icons.check_circle,
+                                      color: Colors.white)),
+                          ]))),
+                ),
+            ]),
+      ]);
+}

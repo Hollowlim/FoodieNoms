@@ -66,6 +66,10 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>FoodieNoms uses the camera to take food listing photos and scan pickup QR codes.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose a photo of your food for your FoodieNoms listing.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>FoodieNoms uses your location when you choose Use My Location. You can also browse Subang Jaya manually.</string>
 </dict>

@@ -46,8 +46,13 @@ const sampleFoods = [
 
 /// Local presentation examples only. This screen has no database or order API.
 class CustomerPreview extends StatelessWidget {
-  const CustomerPreview({super.key, this.search = '', this.category = 'All'});
+  const CustomerPreview(
+      {super.key,
+      this.search = '',
+      this.category = 'All',
+      this.onClearFilters});
   final String search, category;
+  final VoidCallback? onClearFilters;
   @override
   Widget build(BuildContext context) {
     final matches = sampleFoods
@@ -66,9 +71,14 @@ class CustomerPreview extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                   color: studentDark)),
           const SizedBox(height: 8),
-          const Text('Sample deals · Preview only until vendors publish food',
+          const Text(
+              'No live food available yet. Browse these examples while vendors prepare new deals.',
               style: TextStyle(color: Colors.black54, fontSize: 12)),
           const SizedBox(height: 14),
+          if ((search.isNotEmpty || category != 'All') &&
+              onClearFilters != null)
+            TextButton(
+                onPressed: onClearFilters, child: const Text('Clear filters')),
           if (matches.isEmpty)
             const Padding(
                 padding: EdgeInsets.symmetric(vertical: 20),

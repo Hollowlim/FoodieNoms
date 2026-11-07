@@ -53,3 +53,17 @@ functions/node_modules/
 *-debug.log
 # Never commit privileged credentials
 *service-account*.json
+*service_account*.json
+firebase-adminsdk*.json
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.p12
+*.p8
+*.mobileprovision
+
+# Owner admin login alias configuration (no passwords)
+config/admin.local.json

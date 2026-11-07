@@ -1,7 +1,7 @@
 const {test, before, after} = require('node:test');
 const fs = require('node:fs');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
-const {doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, getDocs, serverTimestamp} = require('firebase/firestore');
+const {doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, getDocs, serverTimestamp, writeBatch} = require('firebase/firestore');
 if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Phase 1 tests require the Firestore emulator.');
 let env;
 const profile = (role = 'customer') => ({name: 'Test Account', role, approved: false, createdAt: serverTimestamp()});
@@ -19,7 +19,11 @@ after(async () => { await env?.cleanup(); });
 
 test('customers and vendors create only their own pending profiles', async () => {
   await assertSucceeds(setDoc(doc(userDb('customer'),'users','customer'),profile()));
-  await assertSucceeds(setDoc(doc(userDb('vendor'),'users','vendor'),profile('vendor')));
+  const vendorDb = userDb('vendor'), registration = writeBatch(vendorDb);
+  registration.set(doc(vendorDb,'users','vendor'),profile('vendor'));
+  registration.set(doc(vendorDb,'vendorBusinesses','vendor'),{vendorId:'vendor',businessName:'Test Account',
+    address:'',latitude:null,longitude:null,approved:false,configured:false,updatedAt:serverTimestamp()});
+  await assertSucceeds(registration.commit());
   await assertFails(setDoc(doc(userDb('intruder'),'users','someone-else'),profile()));
   await assertFails(setDoc(doc(env.unauthenticatedContext().firestore(),'users','guest'),profile()));
   await assertFails(setDoc(doc(userDb('self-admin'),'users','self-admin'),profile('admin')));
@@ -49,7 +53,11 @@ test('only admins can approve a vendor and cannot smuggle other changes', async 
   await assertFails(updateDoc(doc(userDb('admin'),'users','customer'),approve('admin')));
   await assertSucceeds(getDocs(query(collection(userDb('admin'),'users'),where('role','==','vendor'))));
   await assertFails(getDocs(collection(userDb('admin'),'users')));
-  await assertSucceeds(updateDoc(vendorRef,approve('admin')));
+  await assertFails(updateDoc(vendorRef,approve('admin'))); // Public status must change atomically.
+  const adminDb = userDb('admin'), approval = writeBatch(adminDb);
+  approval.update(doc(adminDb,'users','vendor'),approve('admin'));
+  approval.update(doc(adminDb,'vendorBusinesses','vendor'),{approved:true,updatedAt:serverTimestamp()});
+  await assertSucceeds(approval.commit());
   await assertFails(updateDoc(vendorRef,{approved:false}));
 });
 test('forged listings, orders and lookup codes remain blocked', async () => {

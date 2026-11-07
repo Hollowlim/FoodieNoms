@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'reference_assets.dart';
 import 'location_state.dart';
 import 'live_location_map.dart';
+import 'student_impact.dart';
 export 'location_state.dart';
 
 const studentGreen = Color(0xFF205F45);
@@ -13,11 +14,59 @@ void openLocation(BuildContext context, PilotLocation location) =>
     Navigator.push<void>(context,
         MaterialPageRoute(builder: (_) => LocationScreen(location: location)));
 
+class ServiceAreaNotice extends StatelessWidget {
+  const ServiceAreaNotice({super.key, required this.location});
+  final PilotLocation location;
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+      animation: location,
+      builder: (context, _) {
+        if (!location.outsideServiceArea) return const SizedBox.shrink();
+        return Semantics(
+            liveRegion: true,
+            child: Container(
+                margin: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                    color: const Color(0xFFFFF3DE),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE4BF7D))),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Row(children: [
+                        Icon(Icons.location_off_outlined,
+                            color: Color(0xFF805519), size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                            child: Text('Outside service area',
+                                style: TextStyle(
+                                    color: Color(0xFF654311),
+                                    fontWeight: FontWeight.w800))),
+                      ]),
+                      const SizedBox(height: 6),
+                      const Text(
+                          'Your detected location is outside our Subang Jaya pilot area. You can still browse pickup deals in Subang Jaya.',
+                          style: TextStyle(
+                              color: Color(0xFF654311), fontSize: 12)),
+                      Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                              onPressed: location.useManual,
+                              child: const Text('Browse Subang Jaya'))),
+                    ])));
+      });
+}
+
 class StudentDiscoverHeader extends StatelessWidget {
   const StudentDiscoverHeader(
-      {super.key, required this.location, required this.onSearch});
+      {super.key,
+      required this.location,
+      required this.onSearch,
+      this.searchController});
   final PilotLocation location;
   final ValueChanged<String> onSearch;
+  final TextEditingController? searchController;
   @override
   Widget build(BuildContext context) =>
       Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -81,6 +130,7 @@ class StudentDiscoverHeader extends StatelessWidget {
                               ]))))),
               const SizedBox(height: 12),
               TextField(
+                  controller: searchController,
                   onChanged: onSearch,
                   decoration: InputDecoration(
                       hintText: 'Search meals, bakeries, cafes…',
@@ -150,20 +200,22 @@ class LocationScreen extends StatelessWidget {
                     LiveLocationMap(location: location),
                     const SizedBox(height: 8),
                     const Text(
-                        'Interactive map · use location to show your blue marker',
+                        'Your blue marker is shown only inside the Subang Jaya service area.',
                         style: TextStyle(color: Colors.black54, fontSize: 12)),
                     const SizedBox(height: 24),
+                    ServiceAreaNotice(location: location),
                     Text('Browsing: ${location.area}',
                         style: const TextStyle(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 10),
                     const Text(
                         'Choose device location or browse our Subang Jaya pilot manually. Listing addresses are shown before you reserve.'),
-                    if (location.position != null)
+                    if (location.inServiceArea)
                       Padding(
                           padding: const EdgeInsets.only(top: 12),
                           child: Text(
                               'Device coordinates: ${location.position!.latitude.toStringAsFixed(4)}, ${location.position!.longitude.toStringAsFixed(4)}')),
-                    if (location.message != null)
+                    if (location.message != null &&
+                        !location.outsideServiceArea)
                       Padding(
                           padding: const EdgeInsets.only(top: 12),
                           child: Text(location.message!)),
@@ -176,12 +228,10 @@ class LocationScreen extends StatelessWidget {
                             : 'Use My Location')),
                     const SizedBox(height: 10),
                     FilledButton.tonal(
-                        onPressed: location.busy
-                            ? null
-                            : () {
-                                location.useManual();
-                                Navigator.pop(context);
-                              },
+                        onPressed: () {
+                          location.useManual();
+                          Navigator.pop(context);
+                        },
                         child: const Text('Browse Subang Jaya Manually')),
                     const SizedBox(height: 20),
                     const Text(
@@ -201,8 +251,10 @@ class StudentProfilePanel extends StatelessWidget {
       required this.onNotifications,
       required this.onLocation,
       required this.onSettings,
-      required this.onLogout});
+      required this.onLogout,
+      this.reservations});
   final String name, email;
+  final Stream<Iterable<Map<String, dynamic>>>? reservations;
   final VoidCallback onPersonalInfo,
       onReviews,
       onNotifications,
@@ -265,6 +317,8 @@ class StudentProfilePanel extends StatelessWidget {
                   Text('Savings tracking coming soon',
                       style: TextStyle(color: Colors.black54, fontSize: 12)),
                 ])),
+        const SizedBox(height: 12),
+        MealsSavedSection(reservations: reservations),
         const SizedBox(height: 20),
         _ProfileRow(
             'Personal information', Icons.person_outline, onPersonalInfo),
@@ -316,10 +370,14 @@ class StudentDealTile extends StatelessWidget {
       required this.subtitle,
       required this.emoji,
       required this.onTap,
-      this.preview = false});
+      this.preview = false,
+      this.photoIndex,
+      this.photoWidget});
   final String title, price, original, subtitle, emoji;
   final VoidCallback onTap;
   final bool preview;
+  final int? photoIndex;
+  final Widget? photoWidget;
   @override
   Widget build(BuildContext context) => Card(
       color: Colors.white,
@@ -340,9 +398,11 @@ class StudentDealTile extends StatelessWidget {
                     child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
                         child: Stack(fit: StackFit.expand, children: [
-                          ReferenceFoodPhoto(
-                              index: referencePhotoForEmoji(emoji)),
-                          if (!preview)
+                          photoWidget ??
+                              ReferenceFoodPhoto(
+                                  index: photoIndex ??
+                                      referencePhotoForEmoji(emoji)),
+                          if (photoWidget == null)
                             const Positioned(
                                 left: 0,
                                 right: 0,

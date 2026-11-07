@@ -8,11 +8,12 @@ let env;
 const client=uid=>env.authenticatedContext(uid).firestore();
 const code=n=>'FN-'+n.toString(16).toUpperCase().padStart(20,'0');
 const listing=(overrides={})=>({title:'Lunch box',description:'Rice and vegetables',address:'1 Test Street, Subang Jaya',
+  latitude:3.075,longitude:101.59,
   dietary:'Contains soy',category:'Meals',priceCents:800,originalPriceCents:1500,stock:1,
   pickupStart:Date.now()+600000,pickupEnd:Date.now()+7200000,vendorId:'vendor',vendorName:'Subang Cafe',
   active:true,createdAt:serverTimestamp(),...overrides});
 const snapshotOrder=(uid,id,deal,quantity=1)=>({customerId:uid,vendorId:deal.vendorId,listingId:id,title:deal.title,
-  vendorName:deal.vendorName,address:deal.address,pickupStart:deal.pickupStart,pickupEnd:deal.pickupEnd,quantity,
+  vendorName:deal.vendorName,address:deal.address,latitude:deal.latitude,longitude:deal.longitude,pickupStart:deal.pickupStart,pickupEnd:deal.pickupEnd,quantity,
   unitPriceCents:deal.priceCents,totalCents:deal.priceCents*quantity,status:'reserved',paymentStatus:'unpaid',createdAt:serverTimestamp()});
 async function reserve(uid,id,orderId) {
   const db=client(uid);
@@ -48,6 +49,8 @@ before(async()=>{
     ['customer','customer',false,'Customer'],['other-customer','customer',false,'Other Customer'],['admin','admin',true,'Admin']]) {
      await setDoc(doc(ctx.firestore(),'users',uid),{name,role,approved,createdAt:serverTimestamp()});
    }
+   await setDoc(doc(ctx.firestore(),'vendorBusinesses','vendor'),{vendorId:'vendor',businessName:'Subang Cafe',
+     address:'1 Test Street, Subang Jaya',latitude:3.075,longitude:101.59,approved:true,configured:true,updatedAt:serverTimestamp()});
  });
 });
 after(async()=>{await env?.cleanup();});
@@ -127,3 +130,4 @@ test('paused, expired and unapproved vendor food cannot be reserved',async()=>{
  await assertFails(reserve('customer','expired',code(61)));
  await assertFails(reserve('customer','unapproved',code(62)));
 });
+

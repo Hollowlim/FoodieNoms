@@ -10,7 +10,7 @@ The connected UI exposes customer Explore/My Pickups/Profile, vendor Listings/Pi
 
 ## Data and transactions
 
-- `users/{uid}`: private name, customer/vendor/admin role, approval and server timestamps. Customers and vendors create their own profile once. Only admins can approve a pending vendor; app clients cannot assign admin roles or edit roles.
+- `users/{uid}`: private name, customer/vendor/admin role, approval and server timestamps. Customers and vendors create their own profile once. Only admins can approve a pending vendor. Existing admins may create separate new admin profiles through the admin-only provisioning flow; existing profile roles cannot be edited.
 - `listings/{id}`: vendor identity, title, category, description, dietary details, integer-cent prices, stock, pickup address and future timestamps. Only approved owners publish and pause listings. Listing content is immutable in this version; publish a new listing for changed content.
 - `reservations/{code}`: customer/vendor IDs, immutable listing snapshot, quantity, integer-cent total, unpaid status, pickup code and creation timestamp. A customer creates an order and reduces stock in one Firestore transaction. Rules validate both sides with `getAfter()` and prevent standalone inventory edits, forged prices or stock increases.
 - Listing `lastReservationId` links each stock change to a newly created order in the same transaction. Reusing an existing order cannot consume inventory twice.

@@ -25,6 +25,16 @@ void main() {
             .then((bytes) => ByteData.sublistView(bytes)));
       await font.load();
     }
+    // Widget tests do not discover macOS's native symbol fallback fonts.
+    // Load one explicitly so the Home banner renders its sparkle correctly.
+    final symbols =
+        File('/System/Library/Fonts/Supplemental/Arial Unicode.ttf');
+    if (await symbols.exists()) {
+      final font = FontLoader('CaptureSymbols')
+        ..addFont(
+            symbols.readAsBytes().then((bytes) => ByteData.sublistView(bytes)));
+      await font.load();
+    }
   });
   testWidgets('logo blends white into cream without tinting its surroundings',
       (tester) async {
@@ -63,72 +73,92 @@ void main() {
   });
   for (final page in ['home', 'profile']) {
     testWidgets('render $page at iPhone width', (tester) async {
-      tester.view.physicalSize = const Size(393, 852);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final location = PilotLocation();
-      addTearDown(location.dispose);
-      final key = GlobalKey();
-      final home = page == 'home';
-      await tester.pumpWidget(RepaintBoundary(
-          key: key,
-          child: MaterialApp(
-            debugShowCheckedModeBanner: false,
-            theme: ThemeData(
-                useMaterial3: true,
-                fontFamily: 'Roboto',
-                scaffoldBackgroundColor: studentCream,
-                colorScheme: ColorScheme.fromSeed(seedColor: studentGreen)),
-            home: Scaffold(
-              appBar: home
-                  ? null
-                  : AppBar(
+      final previousShadows = debugDisableShadows;
+      debugDisableShadows = false;
+      try {
+        tester.view.physicalSize = const Size(393, 852);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final location = PilotLocation();
+        addTearDown(location.dispose);
+        final key = GlobalKey();
+        final home = page == 'home';
+        await tester.pumpWidget(RepaintBoundary(
+            key: key,
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: ThemeData(
+                  useMaterial3: true,
+                  fontFamily: 'Roboto',
+                  fontFamilyFallback: const ['CaptureSymbols'],
+                  scaffoldBackgroundColor: studentCream,
+                  colorScheme:
+                      ColorScheme.fromSeed(seedColor: const Color(0xFF153D29)),
+                  appBarTheme: const AppBarTheme(
                       backgroundColor: studentCream,
-                      title: const Text('FoodieNoms',
-                          style: TextStyle(
-                              fontSize: 19, fontWeight: FontWeight.w700))),
-              body: home
-                  ? Column(children: [
-                      StudentDiscoverHeader(
-                          location: location, onSearch: (_) {}),
-                      const Expanded(child: CustomerPreview())
-                    ])
-                  : StudentProfilePanel(
-                      name: 'Student Account',
-                      email: 'student@example.com',
-                      onPersonalInfo: () {},
-                      onReviews: () {},
-                      onNotifications: () {},
-                      onLocation: () {},
-                      onSettings: () {},
-                      onLogout: () {}),
-              bottomNavigationBar: FoodieNavigation(
-                  role: 'customer',
-                  selectedIndex: home ? 0 : 3,
-                  onSelected: (_) {}),
-            ),
-          )));
-      await tester.runAsync(() => Future.wait([
-            precacheImage(const AssetImage('assets/foodienoms_logo.png'),
-                key.currentContext!),
-            precacheImage(
-                const AssetImage(referenceFoodSheet), key.currentContext!),
-            precacheImage(const AssetImage(referenceMap), key.currentContext!),
-          ]));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      expect(find.text(home ? 'Rescue delicious food.' : 'My profile'),
-          findsOneWidget);
-      final boundary =
-          key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-      await tester.runAsync(() async {
-        final image = await boundary.toImage(pixelRatio: 2);
-        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/tmp/foodienoms-$page-design.png')
-            .writeAsBytes(bytes!.buffer.asUint8List());
-        image.dispose();
-      });
+                      foregroundColor: studentGreen)),
+              home: Scaffold(
+                appBar: home
+                    ? null
+                    : AppBar(
+                        backgroundColor: studentCream,
+                        title: const Text('FoodieNoms',
+                            style: TextStyle(
+                                fontSize: 19, fontWeight: FontWeight.w700))),
+                body: home
+                    ? Column(children: [
+                        StudentDiscoverHeader(
+                            location: location, onSearch: (_) {}),
+                        const Expanded(child: CustomerPreview())
+                      ])
+                    : StudentProfilePanel(
+                        name: 'Student Account',
+                        email: 'student@example.com',
+                        reservations: Stream.value([
+                          {'status': 'collected', 'quantity': 4},
+                          {'status': 'collected', 'quantity': 3},
+                          {'status': 'ready', 'quantity': 2},
+                        ]),
+                        onPersonalInfo: () {},
+                        onReviews: () {},
+                        onNotifications: () {},
+                        onLocation: () {},
+                        onSettings: () {},
+                        onLogout: () {}),
+                bottomNavigationBar: FoodieNavigation(
+                    role: 'customer',
+                    selectedIndex: home ? 0 : 3,
+                    onSelected: (_) {}),
+              ),
+            )));
+        await tester.runAsync(() => Future.wait([
+              precacheImage(const AssetImage('assets/foodienoms_logo.png'),
+                  key.currentContext!),
+              precacheImage(
+                  const AssetImage(referenceFoodSheet), key.currentContext!),
+              precacheImage(
+                  const AssetImage(referenceMap), key.currentContext!),
+            ]));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text(home ? 'Rescue delicious food.' : 'My profile'),
+            findsOneWidget);
+        final boundary =
+            key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        await tester.runAsync(() async {
+          final image = await boundary.toImage(pixelRatio: 2);
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          const output = String.fromEnvironment('CAPTURE_OUTPUT_DIR',
+              defaultValue: '/tmp');
+          await Directory(output).create(recursive: true);
+          await File('$output/foodienoms-$page-design.png')
+              .writeAsBytes(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+      } finally {
+        debugDisableShadows = previousShadows;
+      }
     });
   }
 }

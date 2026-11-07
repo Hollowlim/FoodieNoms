@@ -62,6 +62,9 @@ void main() {
     expect(find.text('Alex Student'), findsOneWidget);
     expect(find.text('alex@example.com'), findsOneWidget);
     expect(find.text('Estimated savings'), findsOneWidget);
+    expect(find.text('Meals Saved'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('Meals Saved')).dy,
+        greaterThan(tester.getTopLeft(find.text('Estimated savings')).dy));
     await tester.scrollUntilVisible(find.text('Privacy & location'), 180);
     await tester.tap(find.text('Privacy & location'));
     expect(openedLocation, isTrue);

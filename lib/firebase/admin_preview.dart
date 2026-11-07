@@ -256,6 +256,21 @@ class _AdminPreviewState extends State<AdminPreview> {
             child: Chip(
                 avatar: Icon(Icons.science_outlined, size: 16),
                 label: Text('Demo workspace · Sample data'))),
+        const SizedBox(height: 12),
+        if (tab == 0)
+          ManagementCard(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                const Text('This demo does not show registered vendors.',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                const Text(
+                    'Use your real admin username or email to review live vendor applications.'),
+                TextButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Sign in to live admin')),
+              ])),
         const SizedBox(height: 24),
         ...content(),
       ]));

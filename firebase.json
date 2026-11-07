@@ -30,8 +30,16 @@
           "projectId": "foodienoms-42a7d",
           "configurations": {
             "ios": "1:147132151155:ios:62d15b6505d873d697c106",
-            "web": "1:147132151155:web:d76eb0f18d9bc37097c106"
+            "web": "1:147132151155:web:d76eb0f18d9bc37097c106",
+            "android": "1:147132151155:android:d0372bb0ec0cfc0997c106"
           }
+        }
+      },
+      "android": {
+        "default": {
+          "projectId": "foodienoms-42a7d",
+          "appId": "1:147132151155:android:d0372bb0ec0cfc0997c106",
+          "fileOutput": "android/app/google-services.json"
         }
       }
     }
